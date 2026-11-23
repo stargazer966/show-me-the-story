@@ -109,6 +109,7 @@ type MemoryEntry struct {
 }
 
 type Progress struct {
+	ProseCandidates             map[int]ProseCandidate   `json:"prose_candidates,omitempty"`
 	Desk                        StoryDesk                `json:"story_desk,omitzero"`
 	NextMemoryID                int                      `json:"next_memory_id,omitempty"`
 	OutlineBatches              []OutlineBatch           `json:"outline_batches,omitempty"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"showmethestory/internal/fsutil"
 	"showmethestory/internal/story"
@@ -23,6 +24,7 @@ func (h *Handlers) storyDesk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer h.endTask()
+	h.workflowAction = fmt.Sprintf("Story Desk · %s · part %d", req.Action, req.Part)
 	if h.projectName != req.Project {
 		h.writeErrorReq(w, r, 409, "invalid_request", "Project changed")
 		return

@@ -5,18 +5,18 @@
   import {t} from '../lib/i18n/index.js';
   import Outline from './Outline.svelte';
   import ImageDraft from '../components/ImageDraft.svelte';
-  let desk, chapters=[], index=0, version=0, beat=0, comment='', draft, preview, busy=false, error='', dirty=false, batch=false, cast=false;
+  let desk, contexts=[], chapters=[], index=0, version=0, beat=0, comment='', draft, preview, busy=false, error='', dirty=false, batch=false, cast=false, manual=null, compare=false;
   const project=$currentProject;
   const draftKey=i=>'story-desk:'+JSON.stringify([project,i]);
   async function request(action,extra={}){
     return api('POST','/api/story-desk',{project,action,part:index+1,revision:desk?.revision||0,version,beat,...extra});
   }
-  function receive(result){desk=result.desk;chapters=result.chapters||[]}
+  function receive(result){desk=result.desk;chapters=result.chapters||[];contexts=result.contexts||[]}
   function select(i){
     index=i;const part=desk.parts[i];draft={title:part.title,beats:part.beats,focus:part.focus};dirty=false;
     try{const local=JSON.parse(localStorage.getItem(draftKey(i)));if(local){draft=local;dirty=true}}catch{}
     version=chapters.find(c=>c.desk_part===i+1)?.desk_version||part.versions?.length||0;
-    beat=0;comment='';preview=null;
+    beat=0;comment='';preview=null;manual=null;compare=false;
   }
   async function load(){
     busy=true;try{receive(await request('open'));select(Math.min(index,desk.parts.length-1));error=''}catch(e){error=e.message}finally{busy=false}
@@ -31,16 +31,17 @@
     receive(await request('save',{draft}));dirty=false;
     try{localStorage.removeItem(draftKey(index))}catch{}
   }
-  async function action(kind,revision=false){
+  async function action(kind,revision=false,mode=''){
     busy=true;error='';try{
       await save();
       if(kind==='save'){addToast($t('common.save'),'success');return}
       if(kind==='preview'||kind==='generate'){
-        const response=await request(kind,{beat:revision?beat:0,comment:revision?comment.trim():''});
+        const response=await request(kind,{beat:revision?beat:0,comment:revision?comment.trim():'',mode});
         if(kind==='preview'){preview=response;return}
         receive(response);version=desk.parts[index].versions.length;beat=0;comment='';
       }else{
-        receive(await request(kind));
+        receive(await request(kind,kind==='manual_outline'?{comment:manual}:{}));
+        if(kind==='manual_outline'){version=desk.parts[index].versions.length;manual=null}
         if(kind==='add')select(desk.parts.length-1);
         if(kind==='use')progress.set(await api('GET','/api/progress'));
       }
@@ -50,6 +51,8 @@
   $: part=desk?.parts[index];
   $: candidate=part?.versions?.[version-1];
   $: chapter=chapters.find(c=>c.desk_part===index+1);
+  $: adopted=part?.versions?.[(chapter?.desk_version||0)-1];
+  $: changed=!!candidate&&(candidate.source?.beats!==draft?.beats||candidate.source?.focus!==draft?.focus||candidate.source?.title!==draft?.title|| (!!candidate.context && candidate.context!==contexts[index]));
 </script>
 <div class="flex gap-2 mb-4">
   <button class="btn btn-sm" class:btn-primary={!batch} on:click={()=>{if(batch)load();batch=false}}>{$t('nav.outline')}</button>
@@ -81,9 +84,13 @@
 </fieldset>
 <fieldset disabled={busy} class="card bg-base-200 p-4 space-y-3 min-w-0">
  <h3 class="text-xl font-semibold">{$t('desk.outline')}</h3>
- <div class="flex flex-wrap gap-2"><button class="btn btn-primary btn-sm" disabled={!draft.beats.trim()} on:click={()=>action('generate')}>{$t(candidate?'desk.roll':'desk.generate')}</button>
- <button class="btn btn-outline btn-sm" disabled={!draft.beats.trim()} on:click={()=>action('preview')}>{$t('desk.preview')}</button></div>
+ <div class="flex flex-wrap gap-2"><button class="btn btn-primary btn-sm" disabled={!draft.beats.trim()} on:click={()=>action('generate',false,changed?'update':'rewrite')}>{$t(candidate?(changed?'flow.updateOutline':'flow.rewriteOutline'):'desk.generate')}</button>
+ <button class="btn btn-outline btn-sm" disabled={!draft.beats.trim()} on:click={()=>action('preview',false,changed?'update':'rewrite')}>{$t('desk.preview')}</button></div>
  {#if candidate}
+ <button class="btn btn-outline btn-sm" on:click={()=>manual=candidate.lines.join('\n\n')}>{$t('flow.editOutline')}</button>
+ {#if adopted && adopted!==candidate}<button class="btn btn-ghost btn-sm" on:click={()=>compare=!compare}>{$t('flow.compare')}</button>{/if}
+ {#if compare&&adopted}<div class="candidate-diff"><p class="whitespace-pre-wrap">{adopted.lines.join('\n\n')}</p><p class="whitespace-pre-wrap">{candidate.lines.join('\n\n')}</p></div>{/if}
+ {#if manual!==null}<textarea class="textarea w-full" rows="7" bind:value={manual} aria-label={$t('flow.editOutline')}></textarea><button class="btn btn-primary btn-sm" disabled={!manual.trim()} on:click={()=>action('manual_outline')}>{$t('common.save')}</button><button class="btn btn-ghost btn-sm" on:click={()=>manual=null}>{$t('common.cancel')}</button>{/if}
  <div class="flex flex-wrap items-center gap-2"><select class="select select-sm" aria-label={$t('desk.version')} bind:value={version} on:change={()=>{beat=0;comment='';preview=null}}>
  {#each part.versions as _,i}<option value={i+1}>{$t('desk.version')} {i+1}{chapter?.desk_version===i+1?' ✓':''}</option>{/each}</select>
  {#if chapter?.desk_version===version}<span class="badge">{$t('desk.active')}</span>{:else}<button class="btn btn-outline btn-sm" on:click={()=>action('use')}>{$t('desk.use')}</button>{/if}</div>

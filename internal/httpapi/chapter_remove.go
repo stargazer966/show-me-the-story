@@ -43,15 +43,15 @@ func (h *Handlers) chapterRemoval(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		frontier, _ := story.ResolveDeleteChapterTarget(h.state)
-		h.writeJSON(w, 200, map[string]any{"token": token, "title": h.state.Chapters[idx].Title, "references": count, "later": len(h.state.Chapters) - idx - 1, "can_clear": frontier == idx})
+
+		h.writeJSON(w, 200, map[string]any{"token": token, "title": h.state.Chapters[idx].Title, "references": count, "later": len(h.state.Chapters) - idx - 1, "can_clear": h.state.Chapters[idx].Content != ""})
 		return
 	}
 	if r.Header.Get("If-Match") != token {
 		h.writeErrorReq(w, r, 409, "invalid_request", "Story changed. Review the chapter again.")
 		return
 	}
-	if err := story.RemoveChapter(h.progressPath, h.state, h.settings, h.postprocess, idx, r.URL.Query().Get("mode") == "clear"); err != nil {
+	if err := story.RemoveChapter(h.progressPath, h.state, h.settings, h.postprocess, idx, true); err != nil {
 		h.writeErrorReq(w, r, 400, "save_progress_failed", err)
 		return
 	}

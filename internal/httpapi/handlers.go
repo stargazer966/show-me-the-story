@@ -55,6 +55,7 @@ type Handlers struct {
 	knowledgeAtStart   string
 	forceKnowledgeSync bool
 	skipKnowledgeSync  bool
+	workflowAction     string
 	autoConfirm        bool // 自动确认模式：章节生成完成后自动确认并继续生成下一章
 
 	lastChatMessage   string             // 缓存最后发送的聊天消息，用于重试
@@ -229,6 +230,9 @@ func (h *Handlers) endTask() {
 			h.broadcastProgress()
 		}
 		h.taskMu.Lock()
+		if err := h.checkpointWorkflow(h.workflowAction); err != nil {
+			h.logger.WarnKey("log.knowledge_failed", err)
+		}
 		h.activeWork = 0
 		h.taskRunning = false
 		if h.taskCancel != nil {
@@ -1328,7 +1332,7 @@ func (h *Handlers) DeleteOutline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, ch := range h.state.Chapters {
-		if ch.Status == story.StatusWriting || ch.Status == story.StatusReview {
+		if ch.Content != "" || ch.Status == story.StatusWriting || ch.Status == story.StatusReview {
 			h.writeErrorReq(w, r, http.StatusConflict, "writing_chapter_present_delete")
 			return
 		}

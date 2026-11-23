@@ -21,8 +21,9 @@ type DeskDraft struct {
 	Focus string `json:"focus"`
 }
 type DeskVersion struct {
-	Source DeskDraft `json:"source"`
-	Lines  []string  `json:"lines"`
+	Source  DeskDraft `json:"source"`
+	Context string    `json:"context,omitempty"`
+	Lines   []string  `json:"lines"`
 }
 type DeskPart struct {
 	PreviouslyLinked bool `json:"previously_linked,omitempty"`
@@ -35,6 +36,7 @@ type DeskRequest struct {
 	Revision          int       `json:"revision"`
 	Part              int       `json:"part"`
 	Version           int       `json:"version"`
+	Mode              string    `json:"mode"`
 	Beat              int       `json:"beat"` // zero means whole outline
 	Comment           string    `json:"comment"`
 	Direction         string    `json:"direction"`
@@ -80,6 +82,12 @@ func syncDesk(p *Progress) bool {
 	}
 	return changed
 }
+func deskContext(cfg *config.Config, p *Progress, settings *ProjectSettings, draft DeskDraft) string {
+	refs, _ := retrieveSettings(settings, draft.Beats+"\n"+draft.Focus, settingsContextRunes)
+	b, _ := json.Marshal([]any{cfg.Language, cfg.Story, p.CorePrompt, p.LongTermDirection, refs})
+	return string(b)
+}
+
 func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, skills []Skill, part DeskPart, req DeskRequest) (DeskPrompt, int, error) {
 	beats := deskBeats(part.Beats)
 	scope := SkillScopeOutlineGenerate
@@ -100,6 +108,26 @@ func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, 
 	lo, hi := outlineRange(cfg)
 	data := map[string]any{"title": state.Title, "premise": state.CorePrompt, "story": cfg.Story, "long_term_direction": state.LongTermDirection, "part": part.Title, "author_beats": beats, "focus": part.Focus, "previous_chapters": BuildPlanningHistory(&history, query, cfg.Language), "related_settings": refs, "chapter_outline_length": formatOutlineLengthRequirementBlock(lo, hi, cfg.Language)}
 	count := len(beats)
+	if req.Mode == "update" {
+		if req.Version < 1 || req.Version > len(part.Versions) {
+			return DeskPrompt{}, 0, errors.New("Select the outline to update")
+		}
+		old := part.Versions[req.Version-1]
+		if old.Source == part.DeskDraft && (old.Context == "" || old.Context == deskContext(cfg, state, settings, part.DeskDraft)) {
+			return DeskPrompt{}, 0, errors.New("The draft has not changed")
+		}
+		data["previous_author_beats"] = deskBeats(old.Source.Beats)
+		data["previous_focus"] = old.Source.Focus
+		data["previous_outline"] = old.Lines
+		if old.Context != "" {
+			data["previous_story_context"] = json.RawMessage(old.Context)
+		}
+		if cfg.Language == "en" {
+			instructions += " Compare the previous and current inputs. Make only necessary changes."
+		} else {
+			instructions += " 比较新旧输入，只作必要修改。"
+		}
+	}
 	if req.Comment != "" {
 		scope = SkillScopeOutlineRevise
 		if req.Version < 1 || req.Version > len(part.Versions) {
@@ -167,11 +195,18 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 		}
 		part := &next.Desk.Parts[req.Part-1]
 		switch req.Action {
+		case "manual_outline":
+			outline := strings.TrimSpace(req.Comment)
+			if outline == "" {
+				return nil, errors.New("Add outline text")
+			}
+			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Source: part.DeskDraft, Context: deskContext(cfg, &next, settings, part.DeskDraft), Lines: strings.Split(outline, "\n\n")})
+			changed = true
 		case "save":
 			part.DeskDraft = req.Draft
 			changed = true
 		case "use":
-			if req.Version < 1 || req.Version > len(part.Versions) || next.BookStatus == BookStatusCompleted {
+			if req.Version < 1 || req.Version > len(part.Versions) {
 				return nil, errors.New("Outline unavailable")
 			}
 			idx := slices.IndexFunc(next.Chapters, func(c ChapterState) bool { return c.DeskPart == req.Part })
@@ -238,6 +273,15 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 					return nil, errors.New("Model returned an empty beat")
 				}
 			}
+			if req.Mode == "update" {
+				old := part.Versions[req.Version-1]
+				previous, current := deskBeats(old.Source.Beats), deskBeats(input.Beats)
+				if len(previous) == len(old.Lines) && old.Source.Focus == input.Focus && (old.Context == "" || old.Context == deskContext(cfg, &next, settings, input.DeskDraft)) {
+					for i, j := range unchangedBeats(previous, current) {
+						reply.Lines[i] = old.Lines[j]
+					}
+				}
+			}
 			if req.Comment != "" && req.Beat > 0 {
 				lines := slices.Clone(part.Versions[req.Version-1].Lines)
 				lines[req.Beat-1] = reply.Lines[0]
@@ -246,7 +290,7 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			part.Versions = append(slices.Clone(part.Versions), DeskVersion{input.DeskDraft, reply.Lines})
+			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Source: input.DeskDraft, Context: deskContext(cfg, &next, settings, input.DeskDraft), Lines: reply.Lines})
 			changed = true
 		default:
 			return nil, errors.New("Unknown desk action")
@@ -259,5 +303,25 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 		}
 		*state = next
 	}
-	return map[string]any{"desk": next.Desk, "chapters": ProgressView(&next).Chapters, "direction": next.LongTermDirection}, nil
+	contexts := make([]string, len(next.Desk.Parts))
+	for i, p := range next.Desk.Parts {
+		contexts[i] = deskContext(cfg, &next, settings, p.DeskDraft)
+	}
+	return map[string]any{"desk": next.Desk, "chapters": ProgressView(&next).Chapters, "direction": next.LongTermDirection, "contexts": contexts}, nil
+}
+
+// Match equal beats in reading order, keeping duplicate beats deterministic.
+func unchangedBeats(old, current []string) map[int]int {
+	matches := map[int]int{}
+	counts := map[string][]int{}
+	for i, text := range old {
+		counts[text] = append(counts[text], i)
+	}
+	for i, text := range current {
+		if positions := counts[text]; len(positions) > 0 {
+			matches[i] = positions[0]
+			counts[text] = positions[1:]
+		}
+	}
+	return matches
 }

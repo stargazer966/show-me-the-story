@@ -207,3 +207,31 @@ body {
 .desk{display:grid;grid-template-columns:minmax(8rem,.48fr) minmax(0,1fr) minmax(0,1.25fr);gap:.8rem;align-items:start}.desk label{display:block}.desk label input,.desk label textarea{display:block;margin-top:.35rem}@container (max-width:52rem){.desk{grid-template-columns:1fr 1fr}.desk nav{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem}.desk nav button{width:auto;margin:0}}@container (max-width:36rem){.desk{grid-template-columns:1fr}}
 
 .settings-layout{display:grid;grid-template-columns:minmax(8rem,10rem) minmax(0,1fr);gap:1rem}.settings-layout nav{flex-direction:column}@container (max-width:44rem){.settings-layout{display:block}.settings-layout nav{flex-direction:row;margin-bottom:1rem}}
+
+[data-theme="xianii"] {
+  color-scheme: light;
+  --color-base-100: #fdfbf5;
+  --color-base-200: #f3efe5;
+  --color-base-300: #e9e5da;
+  --color-base-content: #242f2b;
+  --color-primary: #285545;
+  --color-primary-content: #ffffff;
+  --color-secondary: #44675b;
+  --color-secondary-content: #ffffff;
+  --color-accent: #7a5830;
+  --color-accent-content: #ffffff;
+  --color-neutral: #34483f;
+  --color-neutral-content: #ffffff;
+  --color-success: #a8cbb3;
+  --color-success-content: #173623;
+  --color-info: #286377;
+  --color-info-content: #ffffff;
+  --color-error: #a03939;
+  --color-error-content: #ffffff;
+}
+
+.chapter-heading { min-width: 0; overflow-wrap: anywhere; font-size: 1.25rem; }
+.candidate-panel { border: 1px solid var(--surface-border); border-radius: .55rem; padding: .9rem; background: var(--color-base-100); min-width: 0; }
+.candidate-diff { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin-block: .65rem; }
+.candidate-diff > * { background: var(--color-base-200); border-radius: .35rem; padding: .75rem; overflow-wrap: anywhere; max-height: 27rem; overflow-y: auto; }
+@media (max-width: 760px) { .candidate-diff { grid-template-columns: minmax(0,1fr); } }

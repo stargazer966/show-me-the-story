@@ -182,3 +182,7 @@ graphify explain "<概念>"
 - 手动整章删除按章号预览并校验版本，保留其他章的正文与块 ID。涉及的设定、校订和 Markdown 副本使用 v2 回滚日志与章节文件一起提交；v1 普通保存日志继续兼容。
 
 - Story Desk stores author drafts and append-only outline candidates in project progress. Chapter links use stable part identities across renumbering. Adoption updates only the linked outline; model failure must leave the draft, previous versions and prose intact. The preview and generation share the same message builder and action-scoped skills.
+
+- Writing candidate adoption checks both the chapter source and candidate identity. Writing prose deletion preserves chapter numbering, desk links and outlines. Writing revision does not automatically replan subsequent chapter outlines.
+- Final proofreading uses a persistent manuscript and settings copy. Interactive report decisions, copyedits and exports operate on that copy. Proofread proposals verify the source chapter revision on adoption.
+- Workflow history stores project checkpoints after saved mutations and model tasks. Scoped restores retain other stage data and whole-project restore uses the progress rollback transaction. Global model credentials live outside project history.

@@ -59,7 +59,12 @@ type progressJournal struct {
 	Files   []progressFile `json:"files"`
 }
 
+const progressConfigFile = -2147483648
+
 func progressFilePath(path string, num int) string {
+	if num == progressConfigFile {
+		return filepath.Join(filepath.Dir(path), "config.json")
+	}
 	if num == -1 {
 		return filepath.Join(filepath.Dir(path), "settings.json")
 	}
@@ -369,6 +374,7 @@ func ResetProgressFiles(progressPath string) error {
 func ProgressView(p *Progress) *Progress {
 	cp := *p
 	cp.Desk = StoryDesk{}
+	cp.ProseCandidates = nil
 	cp.Chapters = make([]ChapterState, len(p.Chapters))
 	for i, ch := range p.Chapters {
 		if ch.Content != "" {

@@ -137,3 +137,6 @@ See [AGENTS.md](AGENTS.md) for architecture and contribution constraints, and th
 
 ### Story Desk
 Open Story Desk, add one part per chapter, enter one beat per line and save the draft. Preview the model request or roll an outline candidate. Adopt a version to send it to Writing. Revision comments can target a chapter or a single beat. Batch planning remains available in its own tab.
+
+### Versioned workflow
+Writing can generate and compare a prose candidate for a selected chapter. Deleting prose leaves its outline available. History records saved project changes and can restore a draft, outline, chapter prose, settings, proofreading work, or the whole project. Final proofreading creates its own manuscript copy. Report decisions and approved copyedits stay in that copy, which can be exported separately.

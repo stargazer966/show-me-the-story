@@ -7,6 +7,7 @@
   import { t, uiLocale, setLocale } from './lib/i18n/index.js';
   import TaskTokenBadge from './components/TaskTokenBadge.svelte';
   import Projects from './pages/Projects.svelte';
+  import History from './pages/History.svelte';
   import Config from './pages/Config.svelte';
   import Outline from './pages/StoryDesk.svelte';
   import Writing from './pages/Writing.svelte';
@@ -243,6 +244,7 @@
           ['outline', 'nav.outline'],
           ['writing', 'nav.writing'],
           ['proofread', 'nav.proofread'],
+          ['history','flow.history'],
           ['foreshadows', 'nav.foreshadows'],
           ['memory', 'nav.memory'],
           ['relations', 'nav.relations'],
@@ -267,6 +269,8 @@
           {#key $currentProject}<Outline />{/key}
         {:else if $currentPage === 'writing'}
           <Writing />
+        {:else if $currentPage === 'history'}
+          <History />
         {:else if $currentPage === 'proofread'}
           <Proofread />
         {:else if $currentPage === 'foreshadows'}

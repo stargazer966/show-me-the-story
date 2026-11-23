@@ -14,8 +14,7 @@ func RemoveChapter(path string, state *Progress, settings *ProjectSettings, proo
 		return fmt.Errorf("chapter unavailable")
 	}
 	if clearOnly {
-		target, err := ResolveDeleteChapterTarget(state)
-		if err != nil || target != idx {
+		if state.Chapters[idx].Content == "" {
 			return ErrDeleteFrontierUnavailable
 		}
 	}
@@ -48,6 +47,7 @@ func RemoveChapter(path string, state *Progress, settings *ProjectSettings, proo
 	oldChapters := slices.Clone(p.Chapters)
 	if clearOnly {
 		ch := &p.Chapters[idx]
+		delete(p.ProseCandidates, num)
 		ch.Content = ""
 		ch.Summary = ""
 		ch.Status = StatusPending
@@ -58,7 +58,10 @@ func RemoveChapter(path string, state *Progress, settings *ProjectSettings, proo
 		ch.KnowledgeTracked = false
 		ch.ContentRev = ""
 		ch.WordCount = 0
+		ch.DeskProseVersion = 0
+		ch.DeskEarlierProse = false
 	} else {
+		p.ProseCandidates = nil
 		p.Chapters = slices.Delete(p.Chapters, idx, idx+1)
 		for i := range p.Chapters {
 			p.Chapters[i].Num = shift(p.Chapters[i].Num)
@@ -103,7 +106,7 @@ func RemoveChapter(path string, state *Progress, settings *ProjectSettings, proo
 		if f.Inherited {
 			continue
 		}
-		if f.PlantChapter == num {
+		if !clearOnly && f.PlantChapter == num {
 			f.PlantChapter = 0
 		} else {
 			f.PlantChapter = shift(f.PlantChapter)
@@ -123,9 +126,11 @@ func RemoveChapter(path string, state *Progress, settings *ProjectSettings, proo
 	p.LastOutlineCharacterReport = nil
 	p.LastForeshadowOutlineReport = nil
 	p.NarrativeCheckpoints = nil
-	s.StoryChanges = slices.DeleteFunc(s.StoryChanges, func(c SettingChange) bool { return c.Source.Chapter == num })
-	for i := range s.StoryChanges {
-		s.StoryChanges[i].Source.Chapter = shift(s.StoryChanges[i].Source.Chapter)
+	if !clearOnly {
+		s.StoryChanges = slices.DeleteFunc(s.StoryChanges, func(c SettingChange) bool { return c.Source.Chapter == num })
+		for i := range s.StoryChanges {
+			s.StoryChanges[i].Source.Chapter = shift(s.StoryChanges[i].Source.Chapter)
+		}
 	}
 	remap := func(m map[int]string) map[int]string {
 		out := map[int]string{}
@@ -136,20 +141,24 @@ func RemoveChapter(path string, state *Progress, settings *ProjectSettings, proo
 		}
 		return out
 	}
-	s.StorySynced = remap(s.StorySynced)
-	pp.ApplyErrors = remap(pp.ApplyErrors)
-	pp.Revisions = slices.DeleteFunc(pp.Revisions, func(r ProofreadRevision) bool { return r.ChapterNum == num })
-	for i := range pp.Revisions {
-		pp.Revisions[i].ChapterNum = shift(pp.Revisions[i].ChapterNum)
+	if !clearOnly {
+		s.StorySynced = remap(s.StorySynced)
 	}
-	for i := range pp.Issues {
-		issue := &pp.Issues[i]
-		issue.Anchors = slices.DeleteFunc(issue.Anchors, func(a ProofreadAnchor) bool { return a.ChapterNum == num })
-		for j := range issue.Anchors {
-			issue.Anchors[j].ChapterNum = shift(issue.Anchors[j].ChapterNum)
+	if pp.Copy == nil && !clearOnly {
+		pp.ApplyErrors = remap(pp.ApplyErrors)
+		pp.Revisions = slices.DeleteFunc(pp.Revisions, func(r ProofreadRevision) bool { return r.ChapterNum == num })
+		for i := range pp.Revisions {
+			pp.Revisions[i].ChapterNum = shift(pp.Revisions[i].ChapterNum)
 		}
+		for i := range pp.Issues {
+			issue := &pp.Issues[i]
+			issue.Anchors = slices.DeleteFunc(issue.Anchors, func(a ProofreadAnchor) bool { return a.ChapterNum == num })
+			for j := range issue.Anchors {
+				issue.Anchors[j].ChapterNum = shift(issue.Anchors[j].ChapterNum)
+			}
+		}
+		pp.Issues = slices.DeleteFunc(pp.Issues, func(i ProofreadIssue) bool { return len(i.Anchors) == 0 })
 	}
-	pp.Issues = slices.DeleteFunc(pp.Issues, func(i ProofreadIssue) bool { return len(i.Anchors) == 0 })
 	sb, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err

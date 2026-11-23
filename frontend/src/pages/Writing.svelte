@@ -374,24 +374,52 @@
     cancelBlockOps();
   }
 
-  async function doGenerate() {
+  let showFacts = localStorage.getItem('writing-show-facts') !== 'false';
+  let candidate = null, candidateBase = '', candidateToken = '', candidateBusy = false;
+  let candidateRequest = 0;
+  $: if(ch?.num) loadCandidate(ch.num);
+  async function loadCandidate(num) {
+    const request = ++candidateRequest;
+    candidate = null;
     try {
-      await api('POST', '/api/chapter/generate');
-      addToast($t('writing.toasts.generateStarted', { num: ch?.num }), 'info');
-    } catch (e) { addToast(e.message, 'error'); }
+      const result = await api('GET','/api/writing/candidate/'+num);
+      if (request === candidateRequest) receiveCandidate(result);
+    } catch { /* Loading the current chapter is independent of its candidates. */ }
   }
-
+  function receiveCandidate(result) {
+    candidate = result.candidate?.chapter?.content ? result.candidate : null;
+    candidateBase = result.base;
+    candidateToken = result.token;
+  }
+  async function doGenerate(mode = 'rewrite') {
+    const num = ch.num;
+    candidateBusy = true;
+    try {
+      if(mode==='rewrite' && $autoConfirm && isCurrent && !hasContent && ch.status==='pending'){
+        await api('POST','/api/chapter/generate');
+        return;
+      }
+      const result = await api('POST','/api/writing/candidate/'+num+'?mode='+mode);
+      if(ch?.num===num) receiveCandidate(result);
+    } catch(e) { addToast(e.message,'error'); }
+    finally { candidateBusy=false; }
+  }
+  async function adoptCandidate() {
+    candidateBusy=true;
+    const num=ch.num;
+    try {
+      const updated=await api('PUT','/api/writing/candidate/'+num,undefined,{'If-Match':candidateToken});
+      progress.set(updated);
+      candidate=null;
+    } catch(e) { addToast(e.message,'error'); }
+    finally { candidateBusy=false; }
+  }
   async function doConfirm() {
     try {
-      await api('POST', '/api/chapter/confirm');
-      progress.set(await api('GET', '/api/progress'));
-      addToast($t('writing.toasts.confirmed', { num: ch?.num }), 'success');
-      // 跳到下一章
-      const next = await api('GET', '/api/progress');
-      if (next.current_chapter_index < (next.chapters || []).length) {
-        selectedChapter.set(next.current_chapter_index);
-      }
-    } catch (e) { addToast(e.message, 'error'); }
+      const num=ch.num;
+      progress.set(await api('POST','/api/writing/confirm/'+num));
+      addToast($t('writing.toasts.confirmed',{num}),'success');
+    } catch(e) { addToast(e.message,'error'); }
   }
 
   async function doRevise(confirmed = false) {
@@ -567,7 +595,7 @@
           <h3 class="font-semibold text-warning">{$t('writing.orphan.title')}</h3>
           <p class="text-sm text-base-content/70">{$t('writing.orphan.hint')}</p>
           <div class="flex flex-wrap gap-2">
-            <button class="btn btn-primary btn-xs" disabled={$taskRunning} on:click={doGenerate}>{$t('writing.orphan.retry')}</button>
+            <button class="btn btn-primary btn-xs" disabled={$taskRunning} on:click={()=>doGenerate()}>{$t('writing.orphan.retry')}</button>
             <button class="btn btn-outline btn-xs" disabled={$taskRunning} on:click={() => resolveWritingConflict('force_review')}>{$t('writing.orphan.forceReview')}</button>
             <button class="btn btn-warning btn-xs" disabled={$taskRunning} on:click={gotoOutlineForConflict}>{$t('writing.conflict.gotoOutline')}</button>
             <button class="btn btn-warning btn-xs" disabled={$taskRunning} on:click={gotoForeshadows}>{$t('writing.conflict.gotoForeshadows')}</button>
@@ -634,8 +662,10 @@
         {#if ch}
           <div class="card bg-base-200">
             <div class="card-body p-4 gap-2">
+              <div class="flex items-start justify-between gap-3">
+                <h2 class="card-title chapter-heading">{ch.title===`Chapter ${ch.num}`||ch.title===`第${ch.num}章` ? ch.title : $t('writing.chapter.title', {num:ch.num,title:ch.title})}</h2><ChapterActions {ch}/>
+              </div>
               <div class="flex items-center gap-2 flex-wrap">
-                <ChapterActions {ch}/><h2 class="card-title text-base flex-1 min-w-0">{$t('writing.chapter.title', { num: ch.num, title: ch.title })}</h2>
                 <span class="badge badge-sm {statusMeta[ch.status]?.cls || 'badge-ghost'}">{statusMeta[ch.status]?.label || ch.status}</span>
                 {#if showTaskTokens}
                   <TaskTokenBadge className="text-xs text-base-content/65 font-mono" />
@@ -644,6 +674,28 @@
                 {/if}
               </div>
 
+              {#if !ch.inherited}
+                <div class="flex flex-wrap items-center gap-2">
+                {#if !hasContent}<button class="btn btn-primary btn-sm" disabled={$taskRunning||candidateBusy||ch.status==='writing'||!ch.outline?.trim()} on:click={()=>doGenerate()}>{$t('flow.generate')}</button>
+                {#if !ch.outline?.trim()}<small>{$t('flow.needOutline')}</small>{/if}
+                {:else if ch.desk_earlier_prose}
+                  <button class="btn btn-primary btn-sm" disabled={$taskRunning||candidateBusy} on:click={()=>doGenerate('update')}>{$t('flow.updateProse')}</button><small>{$t('flow.outlineChanged')}</small>
+                {:else}
+                  <button class="btn btn-outline btn-sm" disabled={$taskRunning||candidateBusy||ch.status==='writing'||!ch.outline?.trim()} on:click={()=>doGenerate()}>{$t('flow.rewriteProse')}</button>
+                {/if}
+                <label class="label text-sm"><input type="checkbox" class="checkbox checkbox-sm" bind:checked={showFacts} on:change={e=>localStorage.setItem('writing-show-facts',String(e.target.checked))}/> {$t('flow.factLabels')}</label>
+                </div>
+              {/if}
+              {#if candidateBusy}<p role="status">{$t('desk.working')}</p>{/if}
+              {#if candidate}
+                <details class="candidate-panel" open><summary>{$t('flow.candidate')}</summary>
+                <div class="candidate-diff">
+                  <div><strong>{$t('proofread.before')}</strong><p class="whitespace-pre-wrap">{chapterContent}</p></div>
+                  <div><strong>{$t('proofread.after')}</strong><p class="whitespace-pre-wrap">{candidate.chapter.content}</p></div>
+                </div>
+                <button class="btn btn-primary btn-sm mt-2" disabled={candidateBusy||$taskRunning||candidateBase!==candidate.base} on:click={adoptCandidate}>{$t('flow.adoptProse')}</button>
+                </details>
+              {/if}
               <KnowledgePanel chapterNum={ch.num} bind:facts bind:activeFact bind:expanded={knowledgeExpanded} on:jump={e => jumpToFact(e.detail)} />
               {#if returnRef}<button class="btn btn-outline btn-xs self-start" on:click={() => jumpToFact(returnRef, true)}>{$t('facts.return')}</button>{/if}
 
@@ -679,7 +731,7 @@
                     <div class="space-y-3">
                       {#each chapterBlocks as b (b.id)}
                         <div id={'story-block-' + b.id} class="relative rounded -mx-2 px-2 py-1 cursor-pointer transition-colors hover:bg-base-100/40 {highlightedBlock === b.id || activeFact?.references?.some(r => !r.stale && r.chapter === ch.num && r.block_id === b.id) ? 'bg-info/20' : selectedBlockId === b.id ? 'bg-primary/10' : ''}" role="button" tabindex="0" aria-pressed={selectedBlockId===b.id} on:click={() => selectBlock(b.id)} on:keydown={(e) => { if (e.currentTarget === e.target && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectBlock(b.id); } }}>
-                          {#if blockFacts(b.id).length}<div class="flex flex-wrap gap-1 mb-2">{#each blockFacts(b.id) as fact}<button class="badge badge-warning badge-sm cursor-pointer" on:click|stopPropagation={() => { activeFact = fact; highlightedBlock = b.id; knowledgeExpanded = true; }}>{$t('facts.marker')} #{fact.id}</button>{/each}</div>{/if}
+                          {#if showFacts && blockFacts(b.id).length}<div class="flex flex-wrap gap-1 mb-2">{#each blockFacts(b.id) as fact}<button class="badge badge-warning badge-sm cursor-pointer" on:click|stopPropagation={() => { activeFact = fact; highlightedBlock = b.id; knowledgeExpanded = true; }}>{$t('facts.marker')} #{fact.id}</button>{/each}</div>{/if}
                           {#if editingBlockId === b.id}
                             <textarea class="textarea textarea-sm w-full text-[15px] leading-relaxed" rows={Math.max(3, Math.ceil(b.text.length / 40))} bind:value={editingText} disabled={$taskRunning}></textarea>
                             <div class="flex gap-2 justify-end mt-1">
@@ -736,10 +788,7 @@
 
               <!-- 操作 -->
               <div class="flex gap-2 flex-wrap items-center mt-1">
-                {#if ch.status === 'pending' && isCurrent}
-                  <button class="btn btn-primary btn-sm" on:click={doGenerate} disabled={$taskRunning}>{$t('writing.btn.generate')}</button>
-                {/if}
-                {#if ch.status === 'review' && isCurrent}
+                {#if ch.status === 'review' && !ch.inherited}
                   <button class="btn btn-success btn-sm" on:click={doConfirm} disabled={$taskRunning}>{$t('writing.btn.confirm')}</button>
                 {/if}
                 {#if hasContent && ch.status !== 'writing'}

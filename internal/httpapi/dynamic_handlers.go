@@ -88,7 +88,7 @@ func (h *Handlers) PostStoryResume(w http.ResponseWriter, r *http.Request) {
 	if h.rejectIfTaskRunning(w, r) {
 		return
 	}
-	if h.postprocess != nil && h.postprocess.ContentModified {
+	if h.postprocess != nil && h.postprocess.ContentModified && h.postprocess.Copy == nil {
 		h.writeErrorReq(w, r, http.StatusConflict, "proofread_resume_forbidden")
 		return
 	}

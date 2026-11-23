@@ -146,23 +146,6 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 
 	logger.InfoKey("log.chapter_start", ch.Num, ch.Title)
 
-	// 写前检查：本章大纲若已与实际写出的剧情冲突（如大纲安排初遇但前文已认识），
-	// 先最小化修订大纲再动笔，避免按过时大纲写出矛盾内容。
-	if i > 0 {
-		logger.StepInfo(1, 6, "正在检查本章大纲与当前剧情的一致性...")
-		revised, err := checkOutlineConsistency(ctx, apiCfg, cfg, state, i, logger)
-		if err != nil {
-			logger.WarnKey("log.outline_check_failed", err)
-		} else if revised {
-			if err := SaveProgress(progressPath, state); err != nil {
-				return err
-			}
-			logger.InfoKey("log.outline_auto_revised")
-		} else {
-			logger.InfoKey("log.outline_consistent")
-		}
-	}
-
 	if len(state.Foreshadows) > 0 {
 		RunForeshadowOutlineCheckAndSave(ctx, apiCfg, cfg, state, progressPath, logger)
 	}
@@ -402,15 +385,6 @@ func ReviseChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *con
 	logger.InfoKey("log.summary_done")
 
 	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
-
-	if chapterIdx+1 < len(state.Chapters) {
-		logger.StepInfo(3, 3, "正在修订后续章节大纲...")
-		if err := reviseSubsequentOutlines(ctx, apiCfg, cfg, state, chapterIdx, feedback); err != nil {
-			logger.WarnKey("log.subsequent_outline_failed", err)
-		} else {
-			logger.InfoKey("log.subsequent_outline_done")
-		}
-	}
 
 	ch.Status = StatusReview
 	if err := SaveProgress(progressPath, state); err != nil {

@@ -91,6 +91,16 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("POST /api/chapters/smooth-transitions", h.PostChaptersSmoothTransitions)
 
 	mux.HandleFunc("GET /api/proofread", h.GetProofread)
+	mux.HandleFunc("GET /api/proofread/prose", h.exportProofreadProse)
+	mux.HandleFunc("GET /api/proofread/chapters/{num}", h.getProofreadChapter)
+	mux.HandleFunc("POST /api/proofread/chapters/{num}/sync", h.syncProofreadChapter)
+	mux.HandleFunc("POST /api/proofread/chapters/{num}/adopt", h.adoptProofreadChapter)
+	mux.HandleFunc("GET /api/history", h.workflowHistory)
+	mux.HandleFunc("POST /api/history/{id}", h.restoreHistory)
+	mux.HandleFunc("POST /api/writing/confirm/{num}", h.confirmSelectedChapter)
+	mux.HandleFunc("GET /api/writing/candidate/{num}", h.proseCandidate)
+	mux.HandleFunc("POST /api/writing/candidate/{num}", h.proseCandidate)
+	mux.HandleFunc("PUT /api/writing/candidate/{num}", h.proseCandidate)
 	mux.HandleFunc("DELETE /api/proofread", h.DeleteProofread)
 	mux.HandleFunc("POST /api/proofread/backup", h.PostProofreadBackup)
 	mux.HandleFunc("POST /api/proofread/analyze", h.PostProofreadAnalyze)
@@ -183,7 +193,7 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 		fileServer.ServeHTTP(w, r)
 	})
 
-	handler := recoveryMiddleware(corsMiddleware(loggingMiddleware(projectWriteMiddleware(mux))))
+	handler := recoveryMiddleware(corsMiddleware(loggingMiddleware(projectWriteMiddleware(h.recordWorkflowHistory(mux)))))
 
 	srv := &http.Server{
 		Addr:         port,
