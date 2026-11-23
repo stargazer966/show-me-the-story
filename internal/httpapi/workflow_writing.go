@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -26,6 +27,14 @@ func candidateToken(c story.ProseCandidate) string {
 }
 
 func (h *Handlers) proseCandidate(w http.ResponseWriter, r *http.Request) {
+	h.writeProse(w, r, false)
+}
+
+func (h *Handlers) generateSelectedProse(w http.ResponseWriter, r *http.Request) {
+	h.writeProse(w, r, true)
+}
+
+func (h *Handlers) writeProse(w http.ResponseWriter, r *http.Request, publish bool) {
 	if !h.ensureProject(w, r) {
 		return
 	}
@@ -53,19 +62,15 @@ func (h *Handlers) proseCandidate(w http.ResponseWriter, r *http.Request) {
 	if next.ProseCandidates == nil {
 		next.ProseCandidates = map[int]story.ProseCandidate{}
 	}
+	var prose story.ChapterState
 	if r.Method == http.MethodPut {
 		candidate, ok := next.ProseCandidates[num]
 		if !ok || candidate.Base != proseBase(ch) || candidateToken(candidate) != r.Header.Get("If-Match") {
 			h.writeErrorReq(w, r, 409, "invalid_request", "The chapter changed. Generate a fresh candidate.")
 			return
 		}
-		next.Chapters[idx] = candidate.Chapter
-		next.BookStatus = story.BookStatusActive
-		next.Phase = "writing"
-		if next.CurrentChapterIndex > idx {
-			next.CurrentChapterIndex = idx
-		}
-		delete(next.ProseCandidates, num)
+		prose = candidate.Chapter
+		publish = true
 	} else {
 		if !h.tryStartTask() {
 			h.writeErrorReq(w, r, 409, "task_running_wait")
@@ -78,7 +83,13 @@ func (h *Handlers) proseCandidate(w http.ResponseWriter, r *http.Request) {
 		h.logger.TaskStart("prose_candidate")
 		scope := story.SkillScopeChapterGenerate
 		update := r.URL.Query().Get("mode") == "update"
-		h.workflowAction = fmt.Sprintf("Writing · Chapter %d · %s candidate", num, map[bool]string{true: "Update", false: "Rewrite"}[update])
+		action := "Generate prose"
+		if update {
+			action = "Update prose"
+		} else if ch.Content != "" {
+			action = "Rewrite prose"
+		}
+		h.workflowAction = fmt.Sprintf("Writing · Chapter %d · %s", num, action)
 		if ctx := r.Context(); ctx.Err() != nil {
 			h.logger.TaskEnd("prose_candidate", false)
 			return
@@ -91,25 +102,51 @@ func (h *Handlers) proseCandidate(w http.ResponseWriter, r *http.Request) {
 		if update {
 			scope = story.SkillScopeChapterRevise
 		}
-		ctx := h.activateSkills(h.taskCtx, scope, true)
-		chapter, err := story.DraftProseCandidate(ctx, h.apiCfg, h.cfg, h.state, h.settings, idx, update, sse.NewLogBroadcaster())
+		ctx, cancel := context.WithCancel(h.activateSkills(h.taskCtx, scope, true))
+		defer cancel()
+		stop := context.AfterFunc(r.Context(), cancel)
+		defer stop()
+		logger := h.logger
+		if !publish {
+			logger = sse.NewLogBroadcaster()
+			defer logger.Close()
+		}
+		chapter, err := story.DraftProseCandidate(ctx, h.apiCfg, h.cfg, h.state, h.settings, idx, update, logger)
+		if err == nil {
+			err = ctx.Err()
+		}
 		if err != nil {
 			h.logger.TaskEnd("prose_candidate", false)
 			h.writeErrorReq(w, r, 400, "invalid_request", err.Error())
 			return
 		}
-		next.ProseCandidates[num] = story.ProseCandidate{Base: proseBase(ch), Chapter: chapter}
+		prose = chapter
+		if !publish {
+			next.ProseCandidates[num] = story.ProseCandidate{Base: proseBase(ch), Chapter: chapter}
+		}
+	}
+	if publish {
+		next.Chapters[idx] = prose
+		next.BookStatus = story.BookStatusActive
+		next.Phase = "writing"
+		if next.CurrentChapterIndex > idx {
+			next.CurrentChapterIndex = idx
+		}
+		delete(next.ProseCandidates, num)
 	}
 	err := story.SaveProgress(h.progressPath, &next)
-	if r.Method == http.MethodPost {
-		h.logger.TaskEnd("prose_candidate", err == nil)
-	}
 	if err != nil {
+		if r.Method == http.MethodPost {
+			h.logger.TaskEnd("prose_candidate", false)
+		}
 		h.writeErrorReq(w, r, 500, "save_progress_failed", err)
 		return
 	}
 	*h.state = next
-	if r.Method == http.MethodPut {
+	if r.Method == http.MethodPost {
+		h.logger.TaskEnd("prose_candidate", true)
+	}
+	if publish {
 		story.SaveChapterMarkdown(filepath.Dir(h.progressPath), next.Chapters[idx], next.Title)
 		h.broadcastProgress()
 		h.writeJSON(w, 200, story.ProgressView(h.state))

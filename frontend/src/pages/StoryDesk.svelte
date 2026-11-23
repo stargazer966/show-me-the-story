@@ -11,7 +11,10 @@
   async function request(action,extra={}){
     return api('POST','/api/story-desk',{project,action,part:index+1,revision:desk?.revision||0,version,beat,...extra});
   }
-  function receive(result){desk=result.desk;chapters=result.chapters||[];contexts=result.contexts||[]}
+  function receive(result){
+    desk=result.desk;chapters=result.chapters||[];contexts=result.contexts||[];
+    if(result.progress){progress.set(result.progress);focusWritingChapter(chapters)}
+  }
   function select(i){
     index=i;const part=desk.parts[i];draft={title:part.title,beats:part.beats,focus:part.focus};dirty=false;
     try{const local=JSON.parse(localStorage.getItem(draftKey(i)));if(local){draft=local;dirty=true}}catch{}
@@ -44,10 +47,6 @@
         receive(result);
         if(kind==='manual_outline'){version=desk.parts[index].versions.length;manual=null}
         if(kind==='add')select(desk.parts.length-1);
-        if(kind==='use'){
-          progress.set(result.progress);
-          focusWritingChapter(result.chapters);
-        }
       }
       preview=null;
     }catch(e){error=e.message}finally{busy=false}

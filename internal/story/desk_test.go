@@ -36,8 +36,8 @@ func TestDeskCandidatesAndExistingProse(t *testing.T) {
 	must(DeskRequest{Action: "save", Draft: draft})
 	preview := must(DeskRequest{Action: "preview"}).(DeskPrompt)
 	must(DeskRequest{Action: "generate"})
-	if preview.User != promptSent || !strings.Contains(preview.System, "50–100 English words per beat") || !strings.Contains(promptSent, "Keep it quiet") || state.Chapters[0].Outline != "Legacy outline" {
-		t.Fatal("preview or isolation failed")
+	if preview.User != promptSent || !strings.Contains(preview.System, "50–100 English words per beat") || !strings.Contains(promptSent, "Keep it quiet") || state.Chapters[0].Outline != "First expanded\n\nSecond expanded" || state.Chapters[0].DeskVersion != 2 || state.Desk.Parts[0].Versions[0].Lines[0] != "Legacy outline" {
+		t.Fatal("preview, automatic adoption or history failed")
 	}
 	answer = `{"lines":["Second revised"]}`
 	must(DeskRequest{Action: "generate", Version: 2, Beat: 2, Comment: "Slower"})
@@ -47,6 +47,10 @@ func TestDeskCandidatesAndExistingProse(t *testing.T) {
 	}
 	if _, err := run(DeskRequest{Action: "generate"}); err == nil || len(state.Desk.Parts[0].Versions) != 3 {
 		t.Fatal("partial candidate was accepted")
+	}
+	must(DeskRequest{Action: "use", Version: 1})
+	if state.Chapters[0].Outline != "Legacy outline" {
+		t.Fatal("existing version cannot be restored")
 	}
 	must(DeskRequest{Action: "use", Version: 3})
 	restored, err := LoadProgress(path)
@@ -82,10 +86,25 @@ func TestGeneratedPartTitleAndProgressOnAdoption(t *testing.T) {
 	}
 	run(DeskRequest{Action: "open"})
 	run(DeskRequest{Action: "save", Draft: DeskDraft{Beats: "Wait"}})
-	run(DeskRequest{Action: "generate"})
-	result := run(DeskRequest{Action: "use", Version: 1}).(map[string]any)
+	result := run(DeskRequest{Action: "generate"}).(map[string]any)
 	view := result["progress"].(*Progress)
 	if view.Phase != "writing" || len(view.Chapters) != 1 || view.Chapters[0].Title != "The Last Train" || view.Chapters[0].Status != StatusPending {
 		t.Fatalf("writing did not receive the adopted chapter: %+v", view.Chapters)
+	}
+}
+
+func TestDeskAdoptsLaterPartWithoutChangingChapterNumbers(t *testing.T) {
+	cfg := config.DefaultConfigForLang("en")
+	p := &Progress{Phase: "outline", Desk: StoryDesk{Parts: []DeskPart{{DeskDraft: DeskDraft{Beats: "Arrive"}}, {DeskDraft: DeskDraft{Beats: "Leave"}}}}}
+	path := filepath.Join(t.TempDir(), "progress.json")
+	model := batchAPI(t, func(string) string { return `{"title":"Station","lines":["A character crosses the platform."]}` })
+	for _, part := range []int{2, 1} {
+		_, err := RunDesk(context.Background(), path, p, cfg, nil, nil, model, DeskRequest{Action: "generate", Part: part, Revision: p.Desk.Revision})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(p.Chapters) != 2 || p.Chapters[0].Num != 1 || p.Chapters[0].DeskPart != 1 || p.Chapters[1].Num != 2 || p.Chapters[1].DeskPart != 2 || p.Chapters[0].DeskVersion != 1 || p.Chapters[1].DeskVersion != 1 {
+		t.Fatal(p.Chapters)
 	}
 }

@@ -54,6 +54,7 @@ var errorCatalog = map[string]map[string]string{
 	"content_version_conflict": {LangZH: "正文已变更，请刷新后重新核对", LangEN: "The chapter changed; refresh and review again"},
 	"knowledge_failed":         {LangZH: "事实或设定同步未完成，请重试", LangEN: "Fact or setting synchronization is incomplete; retry"},
 	"batch_synopsis_required":  {LangZH: "请填写本批大纲梗概", LangEN: "An outline synopsis is required for this batch"},
+	"writing_outline_required": {LangZH: "请先生成该章的大纲", LangEN: "Generate an outline for this chapter first"},
 	"batch_count_invalid":      {LangZH: "每批章节数必须为 1 到 36", LangEN: "Each batch must contain 1 to 36 chapters"},
 	"batch_mode_invalid":       {LangZH: "无效的批次生成模式", LangEN: "Invalid batch generation mode"},
 	"batch_book_completed":     {LangZH: "作品已完结，请先恢复连载", LangEN: "Resume the completed book before generating a batch"},

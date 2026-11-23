@@ -1,5 +1,8 @@
 // English UI strings. Mirror of zh.js. Missing keys fall back to zh.
 export default {
+  "flow.revisionBlock": "Block {n} · {words} words",
+  "flow.pacingHint": "For pacing changes, use the block numbers shown on the prose and the beat numbers from Story Desk. For example: Compress blocks 1–4 to about 100 words total. Expand Beat 2 to about 300 words.",
+
   "wf.projectDetails": "Project name and premise (optional)",
   "wf.createTemplate": "Create from template",
   "wf.createBlank": "Create blank project",

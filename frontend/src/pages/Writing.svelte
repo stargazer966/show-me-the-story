@@ -380,44 +380,18 @@
   }
 
   let showFacts = localStorage.getItem('writing-show-facts') !== 'false';
-  let candidate = null, candidateBase = '', candidateToken = '', candidateBusy = false;
-  let candidateRequest = 0;
-  $: if(ch?.num) loadCandidate(ch.num);
-  async function loadCandidate(num) {
-    const request = ++candidateRequest;
-    candidate = null;
-    try {
-      const result = await api('GET','/api/writing/candidate/'+num);
-      if (request === candidateRequest) receiveCandidate(result);
-    } catch { /* Loading the current chapter is independent of its candidates. */ }
-  }
-  function receiveCandidate(result) {
-    candidate = result.candidate?.chapter?.content ? result.candidate : null;
-    candidateBase = result.base;
-    candidateToken = result.token;
-  }
+  let generationBusy = false;
   async function doGenerate(mode = 'rewrite') {
     const num = ch.num;
-    candidateBusy = true;
+    generationBusy = true;
     try {
       if(mode==='rewrite' && $autoConfirm && isCurrent && !hasContent && ch.status==='pending'){
         await api('POST','/api/chapter/generate');
         return;
       }
-      const result = await api('POST','/api/writing/candidate/'+num+'?mode='+mode);
-      if(ch?.num===num) receiveCandidate(result);
+      progress.set(await api('POST','/api/writing/generate/'+num+'?mode='+mode));
     } catch(e) { addToast(e.message,'error'); }
-    finally { candidateBusy=false; }
-  }
-  async function adoptCandidate() {
-    candidateBusy=true;
-    const num=ch.num;
-    try {
-      const updated=await api('PUT','/api/writing/candidate/'+num,undefined,{'If-Match':candidateToken});
-      progress.set(updated);
-      candidate=null;
-    } catch(e) { addToast(e.message,'error'); }
-    finally { candidateBusy=false; }
+    finally { generationBusy=false; }
   }
   async function doConfirm() {
     try {
@@ -681,26 +655,17 @@
 
               {#if !ch.inherited}
                 <div class="flex flex-wrap items-center gap-2">
-                {#if !hasContent}<button class="btn btn-primary btn-sm" disabled={$taskRunning||candidateBusy||ch.status==='writing'||!ch.outline?.trim()} on:click={()=>doGenerate()}>{$t('flow.generate')}</button>
+                {#if !hasContent}<button class="btn btn-primary btn-sm" disabled={$taskRunning||generationBusy||ch.status==='writing'||!ch.outline?.trim()} on:click={()=>doGenerate()}>{$t('flow.generate')}</button>
                 {#if !ch.outline?.trim()}<small>{$t('flow.needOutline')}</small>{/if}
                 {:else if ch.desk_earlier_prose}
-                  <button class="btn btn-primary btn-sm" disabled={$taskRunning||candidateBusy} on:click={()=>doGenerate('update')}>{$t('flow.updateProse')}</button><small>{$t('flow.outlineChanged')}</small>
+                  <button class="btn btn-primary btn-sm" disabled={$taskRunning||generationBusy} on:click={()=>doGenerate('update')}>{$t('flow.updateProse')}</button><small>{$t('flow.outlineChanged')}</small>
                 {:else}
-                  <button class="btn btn-outline btn-sm" disabled={$taskRunning||candidateBusy||ch.status==='writing'||!ch.outline?.trim()} on:click={()=>doGenerate()}>{$t('flow.rewriteProse')}</button>
+                  <button class="btn btn-outline btn-sm" disabled={$taskRunning||generationBusy||ch.status==='writing'||!ch.outline?.trim()} on:click={()=>doGenerate()}>{$t('flow.rewriteProse')}</button>
                 {/if}
                 <label class="label text-sm"><input type="checkbox" class="checkbox checkbox-sm" bind:checked={showFacts} on:change={e=>localStorage.setItem('writing-show-facts',String(e.target.checked))}/> {$t('flow.factLabels')}</label>
                 </div>
               {/if}
-              {#if candidateBusy}<p role="status">{$t('desk.working')}</p>{/if}
-              {#if candidate}
-                <details class="candidate-panel" open><summary>{$t('flow.candidate')}</summary>
-                <div class="candidate-diff">
-                  <div><strong>{$t('proofread.before')}</strong><p class="whitespace-pre-wrap">{chapterContent}</p></div>
-                  <div><strong>{$t('proofread.after')}</strong><p class="whitespace-pre-wrap">{candidate.chapter.content}</p></div>
-                </div>
-                <button class="btn btn-primary btn-sm mt-2" disabled={candidateBusy||$taskRunning||candidateBase!==candidate.base} on:click={adoptCandidate}>{$t('flow.adoptProse')}</button>
-                </details>
-              {/if}
+              {#if generationBusy}<p role="status">{$t('desk.working')}</p>{/if}
               <KnowledgePanel chapterNum={ch.num} bind:facts bind:activeFact bind:expanded={knowledgeExpanded} on:jump={e => jumpToFact(e.detail)} />
               {#if returnRef}<button class="btn btn-outline btn-xs self-start" on:click={() => jumpToFact(returnRef, true)}>{$t('facts.return')}</button>{/if}
 
@@ -734,8 +699,9 @@
                     <span class="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5 align-text-bottom"></span>
                   {:else if chapterBlocks.length > 0}
                     <div class="space-y-3">
-                      {#each chapterBlocks as b (b.id)}
+                      {#each chapterBlocks as b, blockIndex (b.id)}
                         <div id={'story-block-' + b.id} class="relative rounded -mx-2 px-2 py-1 cursor-pointer transition-colors hover:bg-base-100/40 {highlightedBlock === b.id || activeFact?.references?.some(r => !r.stale && r.chapter === ch.num && r.block_id === b.id) ? 'bg-info/20' : selectedBlockId === b.id ? 'bg-primary/10' : ''}" role="button" tabindex="0" aria-pressed={selectedBlockId===b.id} on:click={() => selectBlock(b.id)} on:keydown={(e) => { if (e.currentTarget === e.target && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectBlock(b.id); } }}>
+                          {#if showRevise}<small class="block text-base-content/65">{$t('flow.revisionBlock',{n:blockIndex+1,words:countProseUnits(b.text)})}</small>{/if}
                           {#if showFacts && blockFacts(b.id).length}<div class="flex flex-wrap gap-1 mb-2">{#each blockFacts(b.id) as fact}<button class="badge badge-warning badge-sm cursor-pointer" on:click|stopPropagation={() => { activeFact = fact; highlightedBlock = b.id; knowledgeExpanded = true; }}>{$t('facts.marker')} #{fact.id}</button>{/each}</div>{/if}
                           {#if editingBlockId === b.id}
                             <textarea class="textarea textarea-sm w-full text-[15px] leading-relaxed" rows={Math.max(3, Math.ceil(b.text.length / 40))} bind:value={editingText} disabled={$taskRunning}></textarea>
@@ -833,6 +799,7 @@
                         </div>
                       </fieldset>
                     {/if}
+                  <p class="text-sm text-base-content/75">{$t('flow.pacingHint')}</p>
                   <textarea
                     class="textarea textarea-sm w-full h-20 text-sm"
                     bind:value={reviseFeedback}

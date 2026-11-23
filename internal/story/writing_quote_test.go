@@ -245,3 +245,21 @@ func TestTrimEmptyEnds(t *testing.T) {
 		})
 	}
 }
+
+func TestChapterRevisionSendsNumberedBlocksAndAdoptedBeats(t *testing.T) {
+	cfg := config.DefaultConfigForLang("en")
+	ch := ChapterState{Num: 1, DeskPart: 1, DeskVersion: 1, Outline: "Mara arrives.\n\nMara unlocks the door.", Content: "Mara arrived.\n\nThe old door opened."}
+	p := &Progress{Chapters: []ChapterState{ch}, Desk: StoryDesk{Parts: []DeskPart{{Versions: []DeskVersion{{Source: DeskDraft{Beats: "Arrival\nUnlock"}, Lines: []string{"Mara arrives.", "Mara unlocks the door."}}}}}}}
+	model := batchAPI(t, func(prompt string) string {
+		for _, want := range []string{`"block":1,"block_id":1,"word_count":2`, `"beat":2,"author_beat":"Unlock","outline":"Mara unlocks the door."`, "Compress blocks 1–2", "Block ranges are inclusive"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("request missing %q", want)
+			}
+		}
+		return "Mara arrived and pushed the door open."
+	})
+	_, err := reviseChapterContentStream(context.Background(), model, cfg, p, 0, "Compress blocks 1–2 and expand Beat 2.", &ProjectSettings{}, sse.NewLogBroadcaster())
+	if err != nil {
+		t.Fatal(err)
+	}
+}

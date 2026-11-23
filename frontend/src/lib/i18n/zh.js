@@ -1,6 +1,9 @@
 // Chinese UI strings. Add a key here whenever a hardcoded Chinese phrase
 // is replaced with $t('...') in a Svelte component.
 export default {
+  "flow.revisionBlock": "第 {n} 段 · {words} 字词",
+  "flow.pacingHint": "调整篇幅时请使用正文的段落编号和故事工作台的节拍编号。例如：将第 1–4 段合计压缩至约 100 字，将节拍 2 扩展至约 300 字。",
+
   "wf.projectDetails": "项目名称和故事前提（可选）",
   "wf.createTemplate": "从模板创建",
   "wf.createBlank": "创建空白项目",

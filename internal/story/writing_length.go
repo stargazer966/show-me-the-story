@@ -169,7 +169,7 @@ func finalizeChapterWritingPrompt(template, rendered string, minLen, maxLen, tar
 	return rendered
 }
 
-func adjustChapterLength(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, content string, minLen, maxLen int, logger *sse.LogBroadcaster) (string, error) {
+func adjustChapterLength(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, content string, minLen, maxLen int, revisionFeedback string, logger *sse.LogBroadcaster) (string, error) {
 	actual := prose.CountProseUnits(content)
 	lang := cfg.Language
 	var userPrompt string
@@ -207,6 +207,14 @@ Output ONLY the full revised chapter prose.
 		}
 	}
 
+	if revisionFeedback != "" {
+		if i18n.NormalizeLanguage(lang) == i18n.LangEN {
+			userPrompt += "\n\n[Revision goals to preserve]\n" + revisionFeedback + "\nKeep the revised distribution of space. Preserve any explicitly requested budgets for individual blocks or beats, and adjust other text if needed."
+		} else {
+			userPrompt += "\n\n【需保留的修订目标】\n" + revisionFeedback + "\n保持已调整的段落和节拍比例，并保留作者为指定范围设置的篇幅。必要时调整其他文字。"
+		}
+	}
+
 	systemPrompt := i18n.SystemPromptFor(lang, "author_default")
 	var raw string
 	if logger != nil {
@@ -220,7 +228,7 @@ Output ONLY the full revised chapter prose.
 	return stripChapterMetaProse(raw, lang), nil
 }
 
-func recoverChapterLengthBest(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, bestContent string, minLen, maxLen, target int, bestScore int, logger *sse.LogBroadcaster) (string, error) {
+func recoverChapterLengthBest(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, bestContent string, minLen, maxLen, target int, bestScore int, revisionFeedback string, logger *sse.LogBroadcaster) (string, error) {
 	if bestContent == "" {
 		return "", fmt.Errorf("正文生成失败或被取消")
 	}
@@ -245,7 +253,7 @@ func recoverChapterLengthBest(ctx context.Context, apiCfg *config.APIConfig, cfg
 	if logger != nil {
 		logger.WarnKey("log.chapter_length_adjust", actual, minLen, maxLen)
 	}
-	adjusted, err := adjustChapterLength(ctx, apiCfg, cfg, bestContent, minLen, maxLen, logger)
+	adjusted, err := adjustChapterLength(ctx, apiCfg, cfg, bestContent, minLen, maxLen, revisionFeedback, logger)
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
@@ -312,5 +320,5 @@ func generateChapterContentWithLengthControl(ctx context.Context, apiCfg *config
 		}
 	}
 
-	return recoverChapterLengthBest(ctx, apiCfg, cfg, bestContent, minLen, maxLen, target, bestScore, logger)
+	return recoverChapterLengthBest(ctx, apiCfg, cfg, bestContent, minLen, maxLen, target, bestScore, "", logger)
 }

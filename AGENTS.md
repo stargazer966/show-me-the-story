@@ -188,3 +188,5 @@ graphify explain "<概念>"
 - Workflow history stores project checkpoints after saved mutations and model tasks. Scoped restores retain other stage data and whole-project restore uses the progress rollback transaction. Global model credentials live outside project history.
 
 - Quick creation assigns a unique project name when the author leaves it blank. Story Desk candidates carry a suggested title and target 50–100 English words per beat. Outline adoption returns Writing progress in the same response.
+
+- Story Desk generation adopts the latest outline in the same save while retaining earlier versions. Selective prose generation publishes directly to Writing; chapter revision includes numbered prose blocks and the adopted beats for pacing requests.

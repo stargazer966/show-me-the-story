@@ -53,7 +53,7 @@ func (h *Handlers) storyDesk(w http.ResponseWriter, r *http.Request) {
 		h.writeErrorReq(w, r, code, "invalid_request", err.Error())
 		return
 	}
-	if req.Action == "use" {
+	if req.Action == "use" || req.Action == "generate" || req.Action == "manual_outline" {
 		h.broadcastProgress()
 	}
 	h.writeJSON(w, 200, result)

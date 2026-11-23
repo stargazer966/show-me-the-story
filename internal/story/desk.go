@@ -74,6 +74,9 @@ func syncDesk(p *Progress) bool {
 		}
 		part := &p.Desk.Parts[ch.DeskPart-1]
 		part.PreviouslyLinked = true
+		if ch.DeskVersion == 0 && ch.Outline == "" {
+			continue
+		}
 		if ch.DeskVersion > 0 && ch.DeskVersion <= len(part.Versions) && strings.Join(part.Versions[ch.DeskVersion-1].Lines, "\n\n") == ch.Outline {
 			continue
 		}
@@ -167,6 +170,56 @@ func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, 
 
 var ErrDeskChanged = errors.New("The project changed. Reload the desk before saving.")
 
+func adoptDeskOutline(next *Progress, partNumber, version int) error {
+	part := &next.Desk.Parts[partNumber-1]
+	if version < 1 || version > len(part.Versions) {
+		return errors.New("Outline unavailable")
+	}
+	idx := slices.IndexFunc(next.Chapters, func(c ChapterState) bool { return c.DeskPart == partNumber })
+	if idx < 0 {
+		for _, ch := range next.Chapters {
+			if ch.DeskPart > partNumber {
+				return errors.New("An earlier part cannot be appended after a later chapter")
+			}
+		}
+		num := 1
+		for _, ch := range next.Chapters {
+			num = max(num, ch.Num+1)
+		}
+		// Reserve chapter slots for earlier parts so outlines can be generated out of order.
+		linked := make(map[int]bool, len(next.Chapters))
+		for _, ch := range next.Chapters {
+			linked[ch.DeskPart] = true
+		}
+		for n := 1; n <= partNumber; n++ {
+			previous := &next.Desk.Parts[n-1]
+			if linked[n] || n < partNumber && previous.PreviouslyLinked {
+				continue
+			}
+			next.Chapters = append(next.Chapters, ChapterState{Num: num, Title: previous.Title, Status: StatusPending, DeskPart: n})
+			num++
+		}
+		idx = len(next.Chapters) - 1
+	}
+	part.PreviouslyLinked = true
+	ch := &next.Chapters[idx]
+	v := part.Versions[version-1]
+	if ch.Content != "" && ch.DeskProseVersion == 0 {
+		ch.DeskProseVersion = ch.DeskVersion
+	}
+	ch.DeskEarlierProse = ch.Content != "" && ch.DeskProseVersion != version
+	ch.DeskVersion = version
+	ch.Outline = strings.Join(v.Lines, "\n\n")
+	if title := preferUserValue(v.Source.Title, v.Title); title != "" {
+		ch.Title = title
+	}
+	if ch.Title == "" {
+		ch.Title = fmt.Sprintf("Chapter %d", ch.Num)
+	}
+	next.Phase = "writing"
+	return nil
+}
+
 func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Config, settings *ProjectSettings, skills []Skill, model *config.APIConfig, req DeskRequest) (any, error) {
 	next := *state
 	next.Chapters = slices.Clone(state.Chapters)
@@ -211,44 +264,9 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 			part.DeskDraft = req.Draft
 			changed = true
 		case "use":
-			if req.Version < 1 || req.Version > len(part.Versions) {
-				return nil, errors.New("Outline unavailable")
+			if err := adoptDeskOutline(&next, req.Part, req.Version); err != nil {
+				return nil, err
 			}
-			idx := slices.IndexFunc(next.Chapters, func(c ChapterState) bool { return c.DeskPart == req.Part })
-			if idx < 0 {
-				for _, ch := range next.Chapters {
-					if ch.DeskPart > req.Part {
-						return nil, errors.New("An earlier part cannot be appended after a later chapter")
-					}
-				}
-				for n := 1; n < req.Part; n++ {
-					if slices.IndexFunc(next.Chapters, func(c ChapterState) bool { return c.DeskPart == n }) < 0 && !next.Desk.Parts[n-1].PreviouslyLinked {
-						return nil, errors.New("Adopt earlier parts first")
-					}
-				}
-				num := 1
-				for _, ch := range next.Chapters {
-					num = max(num, ch.Num+1)
-				}
-				next.Chapters = append(next.Chapters, ChapterState{Num: num, Status: StatusPending, DeskPart: req.Part})
-				idx = len(next.Chapters) - 1
-			}
-			part.PreviouslyLinked = true
-			ch := &next.Chapters[idx]
-			v := part.Versions[req.Version-1]
-			if ch.Content != "" && ch.DeskProseVersion == 0 {
-				ch.DeskProseVersion = ch.DeskVersion
-			}
-			ch.DeskEarlierProse = ch.Content != "" && ch.DeskProseVersion != req.Version
-			ch.DeskVersion = req.Version
-			ch.Outline = strings.Join(v.Lines, "\n\n")
-			if title := preferUserValue(v.Source.Title, v.Title); title != "" {
-				ch.Title = title
-			}
-			if ch.Title == "" {
-				ch.Title = fmt.Sprintf("Chapter %d", ch.Num)
-			}
-			next.Phase = "writing"
 			changed = true
 		case "preview", "generate":
 			input := *part
@@ -314,6 +332,11 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 		default:
 			return nil, errors.New("Unknown desk action")
 		}
+		if req.Action == "generate" || req.Action == "manual_outline" {
+			if err := adoptDeskOutline(&next, req.Part, len(part.Versions)); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if changed {
 		next.Desk.Revision++
@@ -328,7 +351,7 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 	}
 	view := ProgressView(&next)
 	result := map[string]any{"desk": next.Desk, "chapters": view.Chapters, "direction": next.LongTermDirection, "contexts": contexts}
-	if req.Action == "use" {
+	if req.Action == "use" || req.Action == "generate" || req.Action == "manual_outline" {
 		result["progress"] = view
 	}
 	return result, nil

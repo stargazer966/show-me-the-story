@@ -100,6 +100,7 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("POST /api/writing/confirm/{num}", h.confirmSelectedChapter)
 	mux.HandleFunc("GET /api/writing/candidate/{num}", h.proseCandidate)
 	mux.HandleFunc("POST /api/writing/candidate/{num}", h.proseCandidate)
+	mux.HandleFunc("POST /api/writing/generate/{num}", h.generateSelectedProse)
 	mux.HandleFunc("PUT /api/writing/candidate/{num}", h.proseCandidate)
 	mux.HandleFunc("DELETE /api/proofread", h.DeleteProofread)
 	mux.HandleFunc("POST /api/proofread/backup", h.PostProofreadBackup)

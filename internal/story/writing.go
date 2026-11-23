@@ -138,6 +138,9 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 	if ch.Status == StatusAccepted {
 		return fmt.Errorf("第 %d 章已确认，请确认当前章节或重置进度", ch.Num)
 	}
+	if ch.DeskPart > 0 && strings.TrimSpace(ch.Outline) == "" {
+		return fmt.Errorf("%s", i18n.T(cfg.Language, "writing_outline_required"))
+	}
 
 	ch.Status = StatusWriting
 	if err := SaveProgress(progressPath, state); err != nil {
@@ -373,14 +376,14 @@ func ReviseChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *con
 	if err != nil {
 		return fmt.Errorf("修改章节失败: %w", err)
 	}
-	ch.Content = revisedContent
 	logger.InfoKey("log.prose_revised", prose.CountProseUnits(revisedContent))
 
 	logger.StepInfo(2, 3, "重新提炼摘要...")
-	summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, ch.Content, logger)
+	summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, revisedContent, logger)
 	if summary == "" {
 		return fmt.Errorf("摘要提炼失败或被取消")
 	}
+	ch.Content = revisedContent
 	ch.Summary = summary
 	logger.InfoKey("log.summary_done")
 
@@ -440,14 +443,14 @@ func ReviseSpecificChapterAction(ctx context.Context, apiCfg *config.APIConfig, 
 	if err != nil {
 		return fmt.Errorf("修订章节失败: %w", err)
 	}
-	ch.Content = revisedContent
 	logger.InfoKey("log.prose_specific_revised", prose.CountProseUnits(revisedContent))
 
 	logger.StepInfo(2, 2, "重新提炼摘要...")
-	summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, ch.Content, logger)
+	summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, revisedContent, logger)
 	if summary == "" {
 		return fmt.Errorf("摘要提炼失败或被取消")
 	}
+	ch.Content = revisedContent
 	ch.Summary = summary
 
 	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
@@ -839,6 +842,7 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	contextChapter.Outline += "\n" + userFeedback
 	characterContext, worldviewContext := buildChapterSettingsContexts(settings, contextChapter, lang)
 
+	original := revisionBlocks(ch)
 	userPrompt := config.RenderPrompt(cfg.Prompts.ChapterRevision, map[string]string{
 		"ChapterNum":       fmt.Sprintf("%d", ch.Num),
 		"ChapterTitle":     ch.Title,
@@ -848,10 +852,12 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 		"WritingPOV":       cfg.Story.WritingPOV,
 		"CharacterContext": characterContext,
 		"WorldviewContext": worldviewContext,
-		"OriginalContent":  ch.Content,
+		"OriginalContent":  original,
 		"UserFeedback":     userFeedback,
 	})
 	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.UserFeedback}}", userFeedback)
+	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.OriginalContent}}", original)
+	userPrompt += revisionPacingContext(state, ch, lang)
 	userPrompt += factProtection(state, ch.Num, lang)
 	target := cfg.Story.TargetWordsPerChapter
 	lo, hi := configuredChapterRange(target, cfg)
@@ -876,7 +882,7 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	}
 	content = stripChapterMetaProse(content, lang)
 	if strictWordCount(cfg) {
-		return recoverChapterLengthBest(ctx, apiCfg, cfg, content, lo, hi, target, proseLengthScore(prose.CountProseUnits(content), lo, hi, target), logger)
+		return recoverChapterLengthBest(ctx, apiCfg, cfg, content, lo, hi, target, proseLengthScore(prose.CountProseUnits(content), lo, hi, target), userFeedback, logger)
 	}
 	return content, nil
 }
