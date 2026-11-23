@@ -1,4 +1,5 @@
 <script>
+ import ImageDraft from "../components/ImageDraft.svelte";
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
   import { apiConfig, config, progress, settings, editingCharID, editingWvID, wvFilter, addToast, showConfirm, taskRunning, apiTestResult } from '../lib/stores.js';
@@ -452,6 +453,7 @@
     <div class="card bg-base-200">
       <div class="card-body p-4 gap-2">
         <h3 class="card-title text-base">{$t('config.api.title')}</h3>
+        <details><summary class="cursor-pointer">{$t('wf.vision')}</summary><div class="grid gap-2 mt-2"><label>Endpoint <input class="input w-full" bind:value={localApiCfg.vision_url} placeholder="http://localhost:8080/v1"/></label><label>{$t('config.api.model')} <input class="input w-full" bind:value={localApiCfg.vision_model}/></label><label>API key <input class="input w-full" type="password" bind:value={localApiCfg.vision_key}/></label></div></details>
         <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
           <div class="col-span-2">
             <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.api.baseUrl')}</span>
@@ -526,7 +528,11 @@
           <div>
             <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.story.targetWords')}</span>
             <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.target_words_per_chapter} disabled={$taskRunning} />
-          </div>
+          </div>{#if $config?.language==='en'}
+          <label>{$t('wf.detail')} <select class="select select-sm w-full" value={(localStoryCfg.outline_min||200)===200 && (localStoryCfg.outline_max||350)===350?'detailed':localStoryCfg.outline_min===80 && localStoryCfg.outline_max===140?'standard':'custom'} on:change={e=>{const mode=e.currentTarget.value;if(mode!=='custom'){localStoryCfg.outline_min=mode==='standard'?80:200;localStoryCfg.outline_max=mode==='standard'?140:350}}}>{#each ['standard','detailed','custom'] as mode}<option value={mode}>{$t('wf.'+mode)}</option>{/each}</select></label>
+          <label>{$t('wf.outlineMin')} <input class="input input-sm w-full" type="number" min="1" bind:value={localStoryCfg.outline_min} placeholder="200"/></label>
+          <label>{$t('wf.outlineMax')} <input class="input input-sm w-full" type="number" min="1" bind:value={localStoryCfg.outline_max} placeholder="350"/></label>
+          <label>{$t('wf.tolerance')} <input class="input input-sm w-full" type="number" min="1" max="100" bind:value={localStoryCfg.word_tolerance} placeholder="10"/></label>{/if}
         </div>
         <div class="flex justify-end">
           <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
@@ -553,6 +559,7 @@
     </div>
   </div>
 
+  <ImageDraft/>
   <!-- Characters -->
   <div class="card bg-base-200">
     <div class="card-body p-4 gap-2">

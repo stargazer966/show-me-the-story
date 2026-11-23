@@ -96,3 +96,28 @@ func TestInstallStandardPackageAndResources(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLooseSkillImport(t *testing.T) {
+	bare := map[string][]byte{"my advice.txt": []byte("Make choices consequential.")}
+	files, _, err := PrepareSkillImport(bare, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, err := InstallSkillFiles(t.TempDir(), files, false)
+	if err != nil || skill.Name != "my advice" || skill.Content != "Make choices consequential." {
+		t.Fatal(skill, err)
+	}
+	multi := map[string][]byte{"folder/main.md": []byte("Write."), "folder/details.txt": []byte("Add a turn.")}
+	_, entries, err := PrepareSkillImport(multi, "", "", nil)
+	if err != nil || len(entries) != 2 {
+		t.Fatal(entries, err)
+	}
+	files, _, err = PrepareSkillImport(multi, "main.md", "Beat plan", []string{SkillScopeOutlineGenerate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, err = InstallSkillFiles(t.TempDir(), files, false)
+	if err != nil || len(skill.Resources) != 1 || skill.AppliesTo[0] != SkillScopeOutlineGenerate {
+		t.Fatal(skill, err)
+	}
+}

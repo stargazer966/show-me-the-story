@@ -6,14 +6,20 @@
   import { t, setLocale } from '../lib/i18n/index.js';
 
   let newProjectName = '';
-  let newProjectLang = 'zh';
+  let newProjectLang = 'en';
   let creating = false;
   let backupBusy = false;
   let restoreName = '';
   let restoreFiles;
   let restoreInput;
 
-  onMount(loadProjects);
+  let templates=[], template='', source='', templateName='', premise='', characters=true, worldview=true;
+  $: chosen=templates.find(t=>t.name===template);
+  async function loadTemplates(){templates=await api('GET','/api/templates')}
+  onMount(async()=>{await loadProjects();try{await loadTemplates()}catch(e){addToast(e.message,'error')}});
+  async function saveTemplate(){
+    try{await api('POST','/api/templates',{source,name:templateName.trim(),characters,worldview});await loadTemplates();template=templateName.trim();source=''}catch(e){addToast(e.message,'error')}
+  }
 
   function phaseLabel(p) {
     if (p === 'completed') return $t('projects.phase.completed');
@@ -71,8 +77,8 @@
     }
     creating = true;
     try {
-      await api('POST', '/api/projects', { name, language: newProjectLang });
-      newProjectName = '';
+      await api('POST', '/api/projects', { name, language: newProjectLang, template, premise });
+      newProjectName = ''; premise='';
       await loadProjects();
       await selectProject(name);
     } catch (e) {
@@ -145,6 +151,9 @@
     <div class="card bg-base-200">
       <div class="card-body p-4">
         <h3 class="card-title text-base">{$t('projects.create')}</h3>
+        <label>{$t('wf.template')} <select class="select w-full" bind:value={template}><option value="">{$t('wf.blank')}</option>{#each templates as item}<option value={item.name}>{item.name}</option>{/each}</select></label>
+        {#if chosen}<p class="text-sm">{chosen.config.language.toUpperCase()} · {chosen.config.story.writing_pov} · {chosen.config.story.target_words_per_chapter} {$t('wf.words')} · {chosen.settings.characters?.length||0} {$t('config.char.title')} · {chosen.settings.worldview?.length||0} {$t('wf.scenes')}</p>{/if}
+        <textarea class="textarea w-full" bind:value={premise} placeholder={$t('wf.premise')} aria-label={$t('wf.premise')}></textarea>
         <input
           type="text"
           class="input w-full"
@@ -157,10 +166,10 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-2">
             <span class="text-xs text-base-content/65">{$t('projects.create.lang')}</span>
-            <div class="tabs tabs-box tabs-sm" role="tablist">
+            {#if chosen}<span>{chosen.config.language.toUpperCase()}</span>{:else}<div class="tabs tabs-box tabs-sm" role="tablist">
               <button type="button" role="tab" class="tab tab-sm" class:tab-active={newProjectLang === 'zh'} aria-selected={newProjectLang === 'zh'} disabled={creating} on:click={() => newProjectLang = 'zh'}>中文</button>
               <button type="button" role="tab" class="tab tab-sm" class:tab-active={newProjectLang === 'en'} aria-selected={newProjectLang === 'en'} disabled={creating} on:click={() => newProjectLang = 'en'}>EN</button>
-            </div>
+            </div>{/if}
           </div>
           <button
             class="btn btn-primary btn-sm"
@@ -242,6 +251,7 @@
                     {$t('common.delete')}
                   </button>
                 {/if}
+                <button class="btn btn-outline btn-xs" disabled={p.compatibility!=='supported'} on:click|stopPropagation={()=>{source=p.name;templateName=p.name}}>{$t('wf.saveTemplate')}</button>
                 <button class="btn btn-outline btn-xs shrink-0" on:click|stopPropagation={() => backupProject(p.name)} disabled={backupBusy || $taskRunning || p.compatibility !== 'supported'}>
                   {$t('projects.backup')}
                 </button>
@@ -253,3 +263,5 @@
     </div>
   </div>
 </div>
+
+{#if source}<div class="modal modal-open"><div class="modal-box space-y-3"><h3>{$t('wf.saveTemplate')} · {source}</h3><input class="input w-full" bind:value={templateName} aria-label={$t('wf.template')}/><label><input type="checkbox" bind:checked={characters}/> {$t('config.char.title')}</label> <label><input type="checkbox" bind:checked={worldview}/> {$t('wf.scenes')}</label><div class="modal-action"><button class="btn" on:click={()=>source=''}>{$t('common.cancel')}</button><button class="btn btn-primary" disabled={!templateName.trim()} on:click={saveTemplate}>{$t('common.save')}</button></div></div></div>{/if}

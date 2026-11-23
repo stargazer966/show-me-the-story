@@ -59,7 +59,7 @@ func isLatinAlnum(r rune) bool {
 }
 
 func isTokenGlue(r rune) bool {
-	return r == '.' || r == ',' || r == '-' || r == '#'
+	return r == '\'' || r == '’' || r == '.' || r == ',' || r == '-' || r == '#'
 }
 
 func isWhitespace(r rune) bool {

@@ -33,6 +33,9 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("GET /api/projects", h.GetProjects)
 	mux.HandleFunc("GET /api/projects/{name}/backup", h.GetProjectBackup)
 	mux.HandleFunc("POST /api/projects/restore", h.PostProjectRestore)
+	mux.HandleFunc("GET /api/templates", h.listTemplates)
+	mux.HandleFunc("POST /api/templates", h.saveTemplate)
+	mux.HandleFunc("POST /api/image-draft", h.imageDraft)
 	mux.HandleFunc("POST /api/projects", h.PostProject)
 	mux.HandleFunc("POST /api/projects/continue", h.PostContinuationProject)
 	mux.HandleFunc("GET /api/projects/current", h.GetProjectCurrent)
@@ -97,6 +100,8 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("DELETE /api/proofread/chapters/{num}/blocks/{id}", h.DeleteProofreadBlock)
 	mux.HandleFunc("POST /api/proofread/chapters/{num}/blocks", h.PostProofreadBlock)
 	mux.HandleFunc("GET /api/proofread/export", h.GetProofreadExport)
+	mux.HandleFunc("POST /api/chapters/{num}/removal-preview", h.chapterRemoval)
+	mux.HandleFunc("DELETE /api/chapters/{num}", h.chapterRemoval)
 	mux.HandleFunc("DELETE /api/chapter", h.DeleteChapter)
 	mux.HandleFunc("DELETE /api/chapters/from/{num}", h.DeleteChaptersFrom)
 	mux.HandleFunc("DELETE /api/outline", h.DeleteOutline)
@@ -286,6 +291,8 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) PostProject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Template string
+		Premise  string
 		Name     string `json:"name"`
 		Language string `json:"language"`
 	}
@@ -308,18 +315,43 @@ func (h *Handlers) PostProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
-		h.writeErrorReq(w, r, http.StatusInternalServerError, "create_project_dir_failed", err.Error())
-		return
-	}
-
-	sessionsDir := filepath.Join(projectDir, "sessions")
-	os.MkdirAll(sessionsDir, 0755)
-
 	cfg := config.DefaultConfigForLang(lang)
+	if lang == "en" {
+		cfg.SkillConfig.EnabledSkills["english-word-count-control"] = true
+	}
+	var settings *story.ProjectSettings
+	if req.Template != "" {
+		t, err := h.readTemplate(req.Template)
+		if err != nil {
+			h.writeErrorReq(w, r, 400, "invalid_request", err.Error())
+			return
+		}
+		cfg = t.Config
+		settings = t.Settings
+		lang = cfg.Language
+		cfg.Story.Title = name
+	}
 	cfg.CreatedWithVersion = h.version
-	if err := config.SaveConfig(filepath.Join(projectDir, "config.json"), cfg); err != nil {
-		h.writeErrorReq(w, r, http.StatusInternalServerError, "init_project_config_failed", err)
+	err := os.MkdirAll(h.storysDir(), 0755)
+	var stage string
+	if err == nil {
+		stage, err = os.MkdirTemp(h.storysDir(), ".restore-")
+	}
+	if err == nil {
+		defer os.RemoveAll(stage)
+		err = config.SaveConfig(filepath.Join(stage, "config.json"), cfg)
+	}
+	if err == nil && settings != nil {
+		err = story.SaveProjectSettings(filepath.Join(stage, "settings.json"), settings)
+	}
+	if err == nil && req.Premise != "" {
+		err = story.SaveProgress(filepath.Join(stage, "progress.json"), &story.Progress{Phase: "writing", BookStatus: story.BookStatusActive, CorePrompt: req.Premise, Title: cfg.Story.Title})
+	}
+	if err == nil {
+		err = os.Rename(stage, projectDir)
+	}
+	if err != nil {
+		h.writeErrorReq(w, r, 500, "init_project_config_failed", err)
 		return
 	}
 

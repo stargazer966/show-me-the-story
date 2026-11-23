@@ -139,6 +139,9 @@ func readMultipartSkillFiles(w http.ResponseWriter, r *http.Request) (map[string
 			if len(paths) > i && key == "files" {
 				name = paths[i]
 			}
+			if _, duplicate := files[name]; duplicate {
+				return nil, false, fmt.Errorf("duplicate skill file: %s", name)
+			}
 			files[name] = b
 		}
 	}
@@ -168,13 +171,27 @@ func (h *Handlers) PostSkillInstall(w http.ResponseWriter, r *http.Request) {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	q := r.URL.Query()
+	files, choices, err := story.PrepareSkillImport(files, q.Get("entry"), strings.TrimSpace(q.Get("name")), q["scope"])
+	if err != nil {
+		h.writeErrorReq(w, r, 400, "invalid_request", err.Error())
+		return
+	}
+	if len(choices) > 0 {
+		if q.Get("validate_only") == "true" {
+			h.writeJSON(w, 200, map[string]any{"entries": choices})
+			return
+		}
+		h.writeErrorReq(w, r, 400, "invalid_request", "Choose the main instructions file")
+		return
+	}
 	if r.URL.Query().Get("validate_only") == "true" {
 		manifest, names, validateErr := story.ValidateSkillFiles(files)
 		if validateErr != nil {
 			h.writeErrorReq(w, r, http.StatusBadRequest, "skill_install_failed", validateErr.Error())
 			return
 		}
-		h.writeJSON(w, http.StatusOK, map[string]interface{}{"valid": true, "manifest": manifest, "files": names})
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{"valid": true, "manifest": manifest, "files": names, "preview": string(files[manifest.EntryPoint])})
 		return
 	}
 	s, err := story.InstallSkillFiles(h.progDir, files, overwrite)

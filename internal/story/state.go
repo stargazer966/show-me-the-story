@@ -182,7 +182,9 @@ func LoadProgress(path string) (*Progress, error) {
 // SaveProgress persists chapter prose to per-chapter files (only chapters
 // whose content changed since load/last save are rewritten), then writes the
 // metadata file without prose content.
-func SaveProgress(path string, p *Progress) error {
+func SaveProgress(path string, p *Progress) error { return saveProgressFiles(path, p, nil) }
+
+func saveProgressFiles(path string, p *Progress, sidecars []progressFile) error {
 	progressStorageMu.Lock()
 	defer progressStorageMu.Unlock()
 	if err := recoverProgress(path, fsutil.WriteFileAtomic); err != nil {
@@ -190,6 +192,9 @@ func SaveProgress(path string, p *Progress) error {
 	}
 	if err := os.MkdirAll(chaptersDir(path), 0755); err != nil {
 		return &fsutil.SaveError{Path: path, Stage: "create_chapters", OriginalPreserved: true, Err: err}
+	}
+	if len(sidecars) > 0 {
+		resetCache(path)
 	}
 	files, err := prepareChapterFiles(path, p)
 	if err != nil {
@@ -209,6 +214,7 @@ func SaveProgress(path string, p *Progress) error {
 	if err != nil {
 		return fmt.Errorf("序列化进度失败: %w", err)
 	}
+	files = append(files, sidecars...)
 	files = append(files, progressFile{Num: 0, Data: data})
 	if err := commitProgressFiles(path, files, fsutil.WriteFileAtomic); err != nil {
 		return fmt.Errorf("保存进度文件失败: %w", err)

@@ -427,6 +427,10 @@ func (h *Handlers) PutConfig(w http.ResponseWriter, r *http.Request) {
 	if newCfg.Story.TargetWordsPerChapter <= 0 {
 		newCfg.Story.TargetWordsPerChapter = 2500
 	}
+	if newCfg.Story.Tolerance < 0 || newCfg.Story.Tolerance > 100 || newCfg.Story.OutlineMin < 0 || newCfg.Story.OutlineMax < 0 || newCfg.Story.OutlineMax > 0 && newCfg.Story.OutlineMax < newCfg.Story.OutlineMin {
+		h.writeErrorReq(w, r, 400, "invalid_request", "Check outline bounds and word count tolerance")
+		return
+	}
 	newCfg.Language = i18n.NormalizeLanguage(newCfg.Language)
 	if newCfg.Language == "" {
 		newCfg.Language = h.cfg.Language
@@ -938,7 +942,7 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 			h.broadcastProgress()
 
 			// 自动确认模式：自动确认本章并继续生成下一章；关闭开关后在本章结束时停止
-			if !h.isAutoConfirmOn() {
+			if !h.isAutoConfirmOn() || story.ChapterNeedsLengthReview(h.cfg, h.state.Chapters[chIdx]) {
 				break
 			}
 			if err := story.ConfirmChapterAction(h.state, h.progressPath); err != nil {

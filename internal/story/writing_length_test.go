@@ -1,6 +1,7 @@
 package story
 
 import (
+	"showmethestory/internal/config"
 	"showmethestory/internal/prose"
 	"strings"
 	"testing"
@@ -79,5 +80,25 @@ func TestMaybeUpdateBestDraft(t *testing.T) {
 	maybeUpdateBestDraft(&best, &score, strings.Repeat("字", 6200), minLen, maxLen, target)
 	if prose.CountProseUnits(best) != 6200 {
 		t.Fatalf("best draft = %d units, want 6200", prose.CountProseUnits(best))
+	}
+}
+
+func TestEnglishWordCountControl(t *testing.T) {
+	cfg := config.DefaultConfigForLang("en")
+	cfg.SkillConfig.EnabledSkills["english-word-count-control"] = true
+	cfg.Story.TargetWordsPerChapter = 800
+	lo, hi := configuredChapterRange(800, cfg)
+	if lo != 720 || hi != 880 {
+		t.Fatal(lo, hi)
+	}
+	if !ChapterNeedsLengthReview(cfg, ChapterState{Content: "Too short."}) {
+		t.Fatal("out-of-range draft auto-confirmable")
+	}
+	if prose.CountProseUnits("Don't say we’re late.") != 4 {
+		t.Fatal("contractions were split")
+	}
+	short := validateOutlineChapterLengths([]OutlineChapter{{Num: 2, Outline: "one verylongword"}}, 3, "en")
+	if len(short) != 1 {
+		t.Fatal("outline counted characters")
 	}
 }

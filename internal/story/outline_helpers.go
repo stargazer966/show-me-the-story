@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"showmethestory/internal/config"
 	"showmethestory/internal/i18n"
+	"showmethestory/internal/prose"
 	"strings"
 	"unicode/utf8"
 )
@@ -30,14 +31,32 @@ func calcOutlineLengthRange(targetWordsPerChapter int) (minLen, maxLen int) {
 	return minLen, maxLen
 }
 
+func outlineRange(cfg *config.Config) (int, int) {
+	if cfg.Language == "en" {
+		lo, hi := cfg.Story.OutlineMin, cfg.Story.OutlineMax
+		if lo <= 0 {
+			lo = 200
+		}
+		if hi < lo {
+			hi = max(350, lo)
+		}
+		return lo, hi
+	}
+	return calcOutlineLengthRange(cfg.Story.TargetWordsPerChapter)
+}
+
 func outlineRuneLen(s string) int {
 	return utf8.RuneCountInString(s)
 }
 
-func validateOutlineChapterLengths(chapters []OutlineChapter, minLen int) []int {
+func validateOutlineChapterLengths(chapters []OutlineChapter, minLen int, languages ...string) []int {
 	var short []int
 	for _, ch := range chapters {
-		if outlineRuneLen(strings.TrimSpace(ch.Outline)) < minLen {
+		n := outlineRuneLen(strings.TrimSpace(ch.Outline))
+		if len(languages) > 0 && languages[0] == "en" {
+			n = prose.CountProseUnits(ch.Outline)
+		}
+		if n < minLen {
 			short = append(short, ch.Num)
 		}
 	}
@@ -86,20 +105,20 @@ func formatCharacterListForOutline(settings *ProjectSettings, lang string) strin
 
 func formatOutlineLengthRequirementBlock(minLen, maxLen int, lang string) string {
 	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
-		return fmt.Sprintf("Each chapter outline must be %d–%d characters (not counting the chapter title). Outlines shorter than %d characters are unacceptable.", minLen, maxLen, minLen)
+		return fmt.Sprintf("Each chapter outline must be %d–%d words (not counting the chapter title). Outlines shorter than %d words are unacceptable.", minLen, maxLen, minLen)
 	}
 	return fmt.Sprintf("每章 outline 字段正文须为 %d–%d 字（不含章节标题）。低于 %d 字视为不合格。", minLen, maxLen, minLen)
 }
 
 func formatOutlineStructureRequirementBlock(lang string) string {
 	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
-		return "Each chapter outline must cover, in order: opening scene/location; core conflict or goal; key turning point or revelation; characters appearing (with roles); how the chapter ends or what hook it leaves."
+		return "Write 4–6 linked beats. For each, establish the setting, goal, obstacle, decision and resulting change. Cover, in order: opening scene/location; core conflict or goal; key turning point or revelation; characters appearing (with roles); how the chapter ends or what hook it leaves."
 	}
 	return "每章大纲须依次包含：开场场景/地点；本章核心冲突或目标；关键转折或信息点；出场人物（及作用）；章末走向或悬念钩子。"
 }
 
 func buildOutlinePromptExtras(cfg *config.Config, settings *ProjectSettings) map[string]string {
-	minLen, maxLen := calcOutlineLengthRange(cfg.Story.TargetWordsPerChapter)
+	minLen, maxLen := outlineRange(cfg)
 	return map[string]string{
 		"OutlineMinWords": fmt.Sprintf("%d", minLen),
 		"OutlineMaxWords": fmt.Sprintf("%d", maxLen),
@@ -120,8 +139,11 @@ func mergeOutlinePromptData(base map[string]string, cfg *config.Config, settings
 
 func finalizeOutlinePrompt(template, rendered string, cfg *config.Config, settings *ProjectSettings) string {
 	lang := cfg.Language
-	minLen, maxLen := calcOutlineLengthRange(cfg.Story.TargetWordsPerChapter)
-	if !strings.Contains(template, "{{.OutlineMinWords}}") {
+	minLen, maxLen := outlineRange(cfg)
+	if lang == "en" {
+		rendered = strings.ReplaceAll(rendered, fmt.Sprintf("%d–%d characters", minLen, maxLen), fmt.Sprintf("%d–%d words", minLen, maxLen))
+	}
+	if lang == "en" || !strings.Contains(template, "{{.OutlineMinWords}}") {
 		block := formatOutlineLengthRequirementBlock(minLen, maxLen, lang) + "\n" + formatOutlineStructureRequirementBlock(lang)
 		rendered += "\n\n" + block
 	}
@@ -135,7 +157,7 @@ func formatShortOutlineRetryFeedback(shortNums []int, minLen int, lang string) s
 	}
 	joined := strings.Join(nums, ", ")
 	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
-		return fmt.Sprintf("\n\nIMPORTANT: Chapters %s have outlines shorter than %d characters. Expand them with concrete plot beats (scene, conflict, turning point, characters, ending hook) and resubmit the full JSON.", joined, minLen)
+		return fmt.Sprintf("\n\nIMPORTANT: Chapters %s have outlines shorter than %d words. Expand them with concrete plot beats (scene, conflict, turning point, characters, ending hook) and resubmit the full JSON.", joined, minLen)
 	}
 	return fmt.Sprintf("\n\n重要：第 %s 章大纲不足 %d 字。请补充具体情节（场景、冲突、转折、人物、章末钩子）后重新输出完整 JSON。", joined, minLen)
 }

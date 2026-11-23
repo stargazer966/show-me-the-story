@@ -1,4 +1,5 @@
 <script>
+ import ChapterActions from "../components/ChapterActions.svelte";
   import { onMount, tick } from 'svelte';
   import { api, apiFetch } from '../lib/api.js';
   import { config, progress, taskRunning, streamingContent, streamingChapterIdx, selectedChapter, autoConfirm, addToast, confirmModal } from '../lib/stores.js';
@@ -226,6 +227,9 @@
 
   // 流式期间 $streamingContent 只含尾部窗口（性能保护），全文在生成结束后按需拉取
   $: displayContent = isStreamingThis ? $streamingContent : chapterContent;
+  $: targetWords=(strictCount ? $config?.story?.target_words_per_chapter : $progress?.story_config_snapshot?.target_words_per_chapter) || $config?.story?.target_words_per_chapter || 2500;
+  $: strictCount=$config?.language==='en' && $config?.skill_config?.enabled_skills?.['english-word-count-control'];
+  $: margin=Math.floor(targetWords*($config?.story?.word_tolerance||10)/100);
   $: chapterWordCount = ch?.word_count || (chapterContent ? countProseUnits(chapterContent) : 0);
   $: showTaskTokens = $taskRunning && isCurrent;
   $: totalWords = chapters.reduce((sum, c) => sum + (c.word_count || 0), 0);
@@ -631,12 +635,12 @@
           <div class="card bg-base-200">
             <div class="card-body p-4 gap-2">
               <div class="flex items-center gap-2 flex-wrap">
-                <h2 class="card-title text-base flex-1 min-w-0">{$t('writing.chapter.title', { num: ch.num, title: ch.title })}</h2>
+                <ChapterActions {ch}/><h2 class="card-title text-base flex-1 min-w-0">{$t('writing.chapter.title', { num: ch.num, title: ch.title })}</h2>
                 <span class="badge badge-sm {statusMeta[ch.status]?.cls || 'badge-ghost'}">{statusMeta[ch.status]?.label || ch.status}</span>
                 {#if showTaskTokens}
                   <TaskTokenBadge className="text-xs text-base-content/65 font-mono" />
                 {:else if chapterWordCount > 0}
-                  <span class="text-xs text-base-content/65">{$t('writing.chapter.words', { n: chapterWordCount.toLocaleString() })}</span>
+                  <span class="text-xs text-base-content/65">{$t('writing.chapter.words', { n: chapterWordCount.toLocaleString() })} / {targetWords} {#if strictCount}· {$t(chapterWordCount>=targetWords-margin && chapterWordCount<=targetWords+margin?'wf.inRange':'wf.outRange')}{/if}</span>
                 {/if}
               </div>
 

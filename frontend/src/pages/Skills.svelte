@@ -1,14 +1,41 @@
 <script>
   import { onMount } from 'svelte';
   import { api, apiFetch } from '../lib/api.js';
-  import { skills, addToast, taskRunning, confirmModal } from '../lib/stores.js';
+  import { config, skills, addToast, taskRunning, confirmModal } from '../lib/stores.js';
   import { t } from '../lib/i18n/index.js';
   let mode='paste', markdown='', selectedFile=null, folderFiles=[], overwrite=false, installing=false, detail=null, wasRunning=false, staticCheck=null;
   async function load(){try{skills.set(await api('GET','/api/skill-library'));}catch(e){addToast(e.message,'error')}}
   onMount(load); $: if(wasRunning&&!$taskRunning)load(); $: wasRunning=$taskRunning;
-  async function toggleSkill(id,enabled){try{await api('PUT','/api/skills/'+encodeURIComponent(id)+'/toggle',{enabled});addToast(enabled?$t('skills.toast.enabled'):$t('skills.toast.disabled'),'success');await load()}catch(e){addToast(e.message,'error');await load()}}
-  async function upload(body,validateOnly=false){const url='/api/skill-library/install'+(validateOnly?'?validate_only=true':'');return (await apiFetch(url,{method:'POST',body})).json()}
-  async function install(){installing=true;staticCheck=null;try{if(mode==='paste'){if(!markdown.trim())throw new Error($t('skills.install.needContent'));staticCheck=await api('POST','/api/skill-library/install?validate_only=true',{markdown,overwrite});await api('POST','/api/skill-library/install',{markdown,overwrite})}else{const fd=new FormData();fd.append('overwrite',String(overwrite));if(mode==='zip'){if(!selectedFile)throw new Error($t('skills.install.needFile'));fd.append('zip',selectedFile)}else if(mode==='markdown'){if(!selectedFile)throw new Error($t('skills.install.needFile'));fd.append('files',selectedFile);fd.append('paths',JSON.stringify([selectedFile.name]))}else{if(!folderFiles.length)throw new Error($t('skills.install.needFolder'));fd.append('paths',JSON.stringify(folderFiles.map(f=>f.webkitRelativePath||f.name)));folderFiles.forEach(f=>fd.append('files',f))}staticCheck=await upload(fd,true);await upload(fd)}addToast($t('skills.install.done'),'success');markdown='';selectedFile=null;folderFiles=[];overwrite=false;await load()}catch(e){staticCheck={valid:false,error:e.message};addToast(e.message,'error')}finally{installing=false}}
+  async function toggleSkill(id,enabled){try{await api('PUT','/api/skills/'+encodeURIComponent(id)+'/toggle',{enabled});addToast(enabled?$t('skills.toast.enabled'):$t('skills.toast.disabled'),'success');config.set(await api("GET","/api/config"));await load()}catch(e){addToast(e.message,'error');await load()}}
+  let name='', entry='', scopes=['chapter.generate','chapter.revise'];
+  const choices=['chapter.generate','chapter.revise','outline.generate','outline.revise','chapter.polish','assistant.chat'];
+  async function submit(preview) {
+    installing=true;
+    try {
+      const query=new URLSearchParams({name,entry,validate_only:String(preview)});
+      for(const scope of scopes) query.append('scope',scope);
+      const url='/api/skill-library/install?'+query;
+      let result;
+      if(mode==='paste') {
+        if(!markdown.trim()) throw new Error($t('skills.install.needContent'));
+        result=await api('POST',url,{markdown,overwrite});
+      } else {
+        const files=mode==='folder'?folderFiles:[selectedFile].filter(Boolean);
+        if(!files.length) throw new Error($t('skills.install.needFile'));
+        const data=new FormData();
+        data.append('overwrite',String(overwrite));
+        if(mode==='zip') data.append('zip',files[0]);
+        else {
+          data.append('paths',JSON.stringify(files.map(f=>f.webkitRelativePath||f.name)));
+          files.forEach(f=>data.append('files',f));
+        }
+        result=await (await apiFetch(url,{method:'POST',body:data})).json();
+      }
+      if(preview){staticCheck=result;return}
+      addToast($t('skills.install.done'),'success'); markdown='';selectedFile=null;folderFiles=[];name='';entry='';staticCheck=null;overwrite=false;await load();
+    } catch(e){staticCheck={error:e.message};addToast(e.message,'error')} finally{installing=false}
+  }
+  $: {mode; markdown; selectedFile; folderFiles; name; scopes; entry; staticCheck=null;}
   async function validateSkill(id){try{await api('POST',`/api/skill-library/${encodeURIComponent(id)}/validate`);addToast($t('skills.validate.started'),'info');await load()}catch(e){addToast(e.message,'error')}}
   async function optimizeSkill(id){try{await api('POST',`/api/skill-library/${encodeURIComponent(id)}/optimize`);addToast($t('skills.optimize.started'),'info')}catch(e){addToast(e.message,'error')}}
   async function showDetail(id){try{detail=await api('GET',`/api/skill-library/${encodeURIComponent(id)}`)}catch(e){addToast(e.message,'error')}}
@@ -19,13 +46,19 @@
 </script>
 
 <div class="space-y-4">
- <div class="card bg-base-200"><div class="card-body p-4">
-  <h2 class="card-title text-base">{$t('skills.install.title')}</h2><div class="tabs tabs-box w-fit">{#each ['paste','markdown','zip','folder'] as item}<button class:tab-active={mode===item} class="tab" on:click={()=>mode=item}>{$t(`skills.install.${item}`)}</button>{/each}</div>
-  {#if mode==='paste'}<textarea class="textarea textarea-bordered w-full h-40 font-mono text-xs" bind:value={markdown} disabled={$taskRunning} placeholder="---&#10;id: my-skill&#10;name: My Skill&#10;category: writing&#10;applies_to: [chapter.generate]&#10;---"></textarea>
+ <div class="card bg-base-200"><div role="region" aria-label={$t("skills.install.title")} class="card-body p-4" on:dragover|preventDefault on:drop|preventDefault={e=>{const f=e.dataTransfer.files[0];if(f&&!installing){entry='';mode=f.name.toLowerCase().endsWith('.zip')?'zip':'markdown';selectedFile=f}}}>
+  <h2 class="card-title text-base">{$t('skills.install.title')}</h2><div class="tabs tabs-box w-fit">{#each ['paste','markdown','zip','folder'] as item}<button class:tab-active={mode===item} class="tab" on:click={()=>{mode=item;entry='';selectedFile=null}}>{$t(`skills.install.${item}`)}</button>{/each}</div>
+  {#if mode==='paste'}<textarea class="textarea textarea-bordered w-full h-40 font-mono text-xs" bind:value={markdown} disabled={$taskRunning} placeholder={$t("wf.paste")}></textarea>
   {:else if mode==='folder'}<input class="file-input file-input-bordered w-full" type="file" webkitdirectory multiple disabled={$taskRunning} on:change={e=>folderFiles=Array.from(e.currentTarget.files)}/>{#if folderFiles.length}<p class="text-xs opacity-60">{folderFiles.length} {$t('skills.install.files')}</p>{/if}
-  {:else}<input class="file-input file-input-bordered w-full" type="file" accept={mode==='zip'?'.zip':'.md,text/markdown'} disabled={$taskRunning} on:change={e=>selectedFile=e.currentTarget.files[0]}/>{/if}
+  {:else}<input class="file-input file-input-bordered w-full" type="file" accept={mode==='zip'?'.zip':'.md,.txt,text/plain,text/markdown'} disabled={$taskRunning} on:change={e=>selectedFile=e.currentTarget.files[0]}/>{/if}
+  {#if selectedFile}<small>{selectedFile.name}</small>{/if}
   <label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox checkbox-sm" bind:checked={overwrite} disabled={$taskRunning}/><span>{$t('skills.install.overwrite')}</span></label>
-  <button class="btn btn-primary btn-sm w-fit" disabled={$taskRunning||installing} on:click={install}>{installing?$t('skills.install.installing'):$t('skills.install.button')}</button>{#if staticCheck}<div class="alert py-2 {staticCheck.valid?'alert-success':'alert-error'}"><span>{staticCheck.valid?$t('skills.install.valid'):`${$t('skills.install.invalid')}: ${staticCheck.error}`}</span></div>{/if}<p class="text-xs opacity-60">{$t('skills.install.security')}</p>
+  <input class="input" bind:value={name} placeholder={$t('wf.skillName')} aria-label={$t('wf.skillName')}/>
+  <fieldset><legend>{$t('wf.scopes')}</legend><div class="flex gap-3 flex-wrap">{#each choices as scope}<label><input class="checkbox checkbox-xs" type="checkbox" bind:group={scopes} value={scope}/> {scope}</label>{/each}</div></fieldset>
+  {#if staticCheck?.entries}<label>{$t('wf.entry')} <select class="select" on:change={e=>entry=e.currentTarget.value}><option value="">—</option>{#each staticCheck.entries as item}<option>{item}</option>{/each}</select></label>{/if}
+  <button class="btn btn-outline btn-sm" disabled={$taskRunning||installing} on:click={()=>submit(true)}>{$t('wf.preview')}</button>
+  {#if staticCheck?.valid}<strong>{staticCheck.manifest.name}</strong><small>{staticCheck.manifest.applies_to.join(', ')}</small><pre class="whitespace-pre-wrap max-h-48 overflow-auto">{staticCheck.preview}</pre><button class="btn btn-primary btn-sm" disabled={$taskRunning||installing} on:click={()=>submit(false)}>{$t('skills.install.button')}</button>{/if}
+
  </div></div>
  <div class="card bg-base-200"><div class="card-body p-4"><h2 class="card-title text-base">{$t('skills.title')}</h2><p class="text-sm opacity-60 mb-3">{$t('skills.intro')}</p><div class="overflow-x-auto"><table class="table table-sm">
   <thead><tr><th>{$t('skills.col.name')}</th><th>{$t('skills.col.scope')}</th><th>{$t('skills.col.validation')}</th><th>{$t('skills.col.source')}</th><th>{$t('skills.col.actions')}</th><th>{$t('skills.col.enabled')}</th></tr></thead><tbody>

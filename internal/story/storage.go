@@ -60,6 +60,15 @@ type progressJournal struct {
 }
 
 func progressFilePath(path string, num int) string {
+	if num == -1 {
+		return filepath.Join(filepath.Dir(path), "settings.json")
+	}
+	if num == -2 {
+		return filepath.Join(filepath.Dir(path), "postprocess.json")
+	}
+	if num < -2 {
+		return ChapterMarkdownPath(filepath.Dir(path), -num-2)
+	}
 	if num == 0 {
 		return path
 	}
@@ -84,15 +93,18 @@ func recoverProgress(path string, write func(string, []byte) error) error {
 	if err := json.Unmarshal(data, &journal); err != nil {
 		return failure(err)
 	}
-	if journal.Version != 1 || len(journal.Files) == 0 {
+	if (journal.Version != 1 && journal.Version != 2) || len(journal.Files) == 0 {
 		return failure(errors.New("invalid progress rollback journal"))
 	}
 	seen := make(map[int]bool, len(journal.Files))
 	for _, file := range journal.Files {
-		if file.Num < 0 || seen[file.Num] {
+		if (file.Num < 0 && journal.Version != 2) || seen[file.Num] {
 			return failure(errors.New("invalid rollback file number"))
 		}
 		seen[file.Num] = true
+	}
+	if journal.Version == 2 && (!seen[-1] || !seen[-2]) {
+		return failure(errors.New("incomplete chapter removal journal"))
 	}
 	if !seen[0] {
 		return failure(errors.New("rollback journal has no progress metadata"))
@@ -123,6 +135,9 @@ func recoverProgress(path string, write func(string, []byte) error) error {
 func commitProgressFiles(path string, files []progressFile, write func(string, []byte) error) error {
 	journal := progressJournal{Version: 1}
 	for _, file := range files {
+		if file.Num < 0 {
+			journal.Version = 2
+		}
 		target := progressFilePath(path, file.Num)
 		data, err := os.ReadFile(target)
 		if err != nil && !os.IsNotExist(err) {
@@ -139,7 +154,16 @@ func commitProgressFiles(path string, files []progressFile, write func(string, [
 		return err
 	}
 	for _, file := range files {
-		if err = write(progressFilePath(path, file.Num), file.Data); err != nil {
+		target := progressFilePath(path, file.Num)
+		if file.Data == nil {
+			err = os.Remove(target)
+			if os.IsNotExist(err) {
+				err = nil
+			}
+		} else {
+			err = write(target, file.Data)
+		}
+		if err != nil {
 			break
 		}
 	}
@@ -314,7 +338,7 @@ func loadChapterContents(progressPath string, p *Progress) error {
 		if len(ch.Blocks) == 0 && ch.Content != "" {
 			SyncChapterBlocks(ch)
 		}
-		if ch.WordCount == 0 && ch.Content != "" {
+		if ch.Content != "" {
 			ch.WordCount = prose.CountProseUnits(ch.Content)
 		}
 		cache[ch.Num] = HashContent(ch.Content)

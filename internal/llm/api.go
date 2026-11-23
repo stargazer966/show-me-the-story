@@ -34,8 +34,19 @@ type tokenUsage struct {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	ImageURL string `json:"-"`
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+}
+
+// MarshalJSON emits OpenAI content parts only for a vision request.
+func (m Message) MarshalJSON() ([]byte, error) {
+	type plain Message
+	if m.ImageURL == "" {
+		return json.Marshal(plain(m))
+	}
+	parts := []map[string]any{{"type": "text", "text": m.Content}, {"type": "image_url", "image_url": map[string]string{"url": m.ImageURL}}}
+	return json.Marshal(map[string]any{"role": m.Role, "content": parts})
 }
 
 type ChatResponse struct {

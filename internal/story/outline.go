@@ -88,9 +88,8 @@ func intSliceToStr(nums []int) []string {
 func generateOutlineChaptersOnly(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, settings *ProjectSettings, template string, baseData map[string]string, logger *sse.LogBroadcaster) (OutlineResponse, error) {
 	data := mergeOutlinePromptData(baseData, cfg, settings)
 	systemPrompt := i18n.SystemPromptFor(cfg.Language, "outline_editor_json")
-	minLen, _ := calcOutlineLengthRange(cfg.Story.TargetWordsPerChapter)
+	minLen, _ := outlineRange(cfg)
 
-	var lastChapters []OutlineChapter
 	var lastShort []int
 	for attempt := 0; attempt < outlineGenMaxAttempts; attempt++ {
 		userPrompt := finalizeOutlinePrompt(template, config.RenderPrompt(template, data), cfg, settings)
@@ -108,8 +107,7 @@ func generateOutlineChaptersOnly(ctx context.Context, apiCfg *config.APIConfig, 
 		if err := json.Unmarshal([]byte(rawResp), &resp); err != nil {
 			return OutlineResponse{}, fmt.Errorf("解析大纲JSON失败: %w\n原始响应: %s", err, rawResp)
 		}
-		lastChapters = resp.Chapters
-		lastShort = validateOutlineChapterLengths(resp.Chapters, minLen)
+		lastShort = validateOutlineChapterLengths(resp.Chapters, minLen, cfg.Language)
 		if len(lastShort) == 0 {
 			return resp, nil
 		}
@@ -119,7 +117,7 @@ func generateOutlineChaptersOnly(ctx context.Context, apiCfg *config.APIConfig, 
 	if len(lastShort) > 0 {
 		logger.WarnKey("log.outline_chapters_still_short", strings.Join(intSliceToStr(lastShort), ", "), minLen)
 	}
-	return OutlineResponse{Chapters: lastChapters}, nil
+	return OutlineResponse{}, fmt.Errorf("%s", strings.TrimSpace(formatShortOutlineRetryFeedback(lastShort, minLen, cfg.Language)))
 }
 
 func reviseOutline(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, state *Progress, settings *ProjectSettings, userFeedback, progressPath, cfgPath string, logger *sse.LogBroadcaster) error {
@@ -140,7 +138,7 @@ func reviseOutline(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Co
 	}, cfg, selectedSettings)
 
 	systemPrompt := i18n.SystemPromptFor(lang, "outline_editor_locked_json")
-	minLen, _ := calcOutlineLengthRange(cfg.Story.TargetWordsPerChapter)
+	minLen, _ := outlineRange(cfg)
 
 	var resp OutlineResponse
 	var lastShort []int
@@ -160,7 +158,17 @@ func reviseOutline(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Co
 			return err
 		}
 		resp = *parsed
-		lastShort = validateOutlineChapterLengths(resp.Chapters, minLen)
+		editable := make(map[int]bool, len(state.Chapters))
+		for _, ch := range state.Chapters {
+			editable[ch.Num] = ch.Status != StatusAccepted && !ch.Inherited
+		}
+		var changed []OutlineChapter
+		for _, ch := range resp.Chapters {
+			if editable[ch.Num] {
+				changed = append(changed, ch)
+			}
+		}
+		lastShort = validateOutlineChapterLengths(changed, minLen, cfg.Language)
 		if len(lastShort) == 0 {
 			break
 		}
@@ -169,6 +177,9 @@ func reviseOutline(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Co
 		}
 	}
 
+	if len(lastShort) > 0 {
+		return fmt.Errorf("%s", strings.TrimSpace(formatShortOutlineRetryFeedback(lastShort, minLen, lang)))
+	}
 	return applyOutlineRevision(cfg, state, resp, "outline_revision", PendingConfigChangesPath(progressPath), cfgPath, logger)
 }
 

@@ -234,7 +234,7 @@ func runImportPipeline(ctx context.Context, apiCfg *config.APIConfig, cfg *confi
 	}
 
 	// Step 2: per-chapter outline + summary, checkpoint after each.
-	minLen, maxLen := calcOutlineLengthRange(cfg.Story.TargetWordsPerChapter)
+	minLen, maxLen := outlineRange(cfg)
 	for i := range state.Chapters {
 		ch := &state.Chapters[i]
 		if ch.Summary != "" && ch.Outline != "" {

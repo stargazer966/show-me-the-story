@@ -42,6 +42,34 @@ func calcChapterLengthRange(targetWordsPerChapter int) (minLen, maxLen int) {
 	return minLen, maxLen
 }
 
+func strictWordCount(cfg *config.Config) bool {
+	return cfg.Language == "en" && cfg.SkillConfig != nil && cfg.SkillConfig.EnabledSkills["english-word-count-control"]
+}
+
+// ChapterNeedsLengthReview pauses auto-confirm if a bounded adjustment still missed its target.
+func ChapterNeedsLengthReview(cfg *config.Config, ch ChapterState) bool {
+	if !strictWordCount(cfg) {
+		return false
+	}
+	lo, hi := configuredChapterRange(cfg.Story.TargetWordsPerChapter, cfg)
+	return !chapterLengthInRange(ch.Content, lo, hi)
+}
+
+func configuredChapterRange(target int, cfg *config.Config) (int, int) {
+	if strictWordCount(cfg) {
+		pct := cfg.Story.Tolerance
+		if pct <= 0 || pct > 100 {
+			pct = 10
+		}
+		if target <= 0 {
+			target = 2500
+		}
+		diff := target * pct / 100
+		return max(1, target-diff), target + diff
+	}
+	return calcChapterLengthRange(target)
+}
+
 func chapterLengthInRange(content string, minLen, maxLen int) bool {
 	n := prose.CountProseUnits(content)
 	return n >= minLen && n <= maxLen
@@ -104,7 +132,7 @@ func maybeUpdateBestDraft(bestContent *string, bestScore *int, content string, m
 
 func formatChapterLengthRequirementBlock(minLen, maxLen, target int, lang string) string {
 	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
-		return fmt.Sprintf("Chapter prose must be %d–%d words (target %d; tolerance ±%d words or ±%d%%, whichever is larger). Exceeding %d words is unacceptable — stay inside this chapter's outline only.", minLen, maxLen, target, chapterLengthToleranceAbsolute, chapterLengthTolerancePercent, maxLen)
+		return fmt.Sprintf("Chapter prose must be %d–%d words (target %d). Exceeding %d words is unacceptable — stay inside this chapter's outline only.", minLen, maxLen, target, maxLen)
 	}
 	return fmt.Sprintf("正文字数须严格控制在 %d–%d 字（目标 %d 字；允许误差 ±%d 字或 ±%d%%，取较大者）。超过 %d 字不可接受，只写本章大纲范围内的情节。", minLen, maxLen, target, chapterLengthToleranceAbsolute, chapterLengthTolerancePercent, maxLen)
 }
@@ -200,14 +228,14 @@ func recoverChapterLengthBest(ctx context.Context, apiCfg *config.APIConfig, cfg
 	if chapterLengthInRange(bestContent, minLen, maxLen) {
 		return bestContent, nil
 	}
-	if isSoftLengthDeviation(actual, minLen, maxLen) {
+	if !strictWordCount(cfg) && isSoftLengthDeviation(actual, minLen, maxLen) {
 		if logger != nil {
 			logger.WarnKey("log.chapter_length_soft_keep", actual, minLen, maxLen)
 			logger.WarnKey("log.chapter_length_off_range", actual, minLen, maxLen)
 		}
 		return bestContent, nil
 	}
-	if !shouldAttemptLengthAdjust(actual, minLen, maxLen) {
+	if !strictWordCount(cfg) && !shouldAttemptLengthAdjust(actual, minLen, maxLen) {
 		if logger != nil {
 			logger.WarnKey("log.chapter_length_skip_adjust", actual, minLen, maxLen)
 			logger.WarnKey("log.chapter_length_off_range", actual, minLen, maxLen)
@@ -218,6 +246,9 @@ func recoverChapterLengthBest(ctx context.Context, apiCfg *config.APIConfig, cfg
 		logger.WarnKey("log.chapter_length_adjust", actual, minLen, maxLen)
 	}
 	adjusted, err := adjustChapterLength(ctx, apiCfg, cfg, bestContent, minLen, maxLen, logger)
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	if err != nil || adjusted == "" {
 		if logger != nil {
 			logger.WarnKey("log.chapter_length_adjust_failed", err)
@@ -249,7 +280,10 @@ func generateChapterContentWithLengthControl(ctx context.Context, apiCfg *config
 		snapshot = &cfg.Story
 	}
 	target := snapshot.TargetWordsPerChapter
-	minLen, maxLen := calcChapterLengthRange(target)
+	if strictWordCount(cfg) {
+		target = cfg.Story.TargetWordsPerChapter
+	}
+	minLen, maxLen := configuredChapterRange(target, cfg)
 	lang := cfg.Language
 	lengthFeedback := ""
 	var bestContent string

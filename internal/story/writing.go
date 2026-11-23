@@ -540,8 +540,11 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 	outlineConstraints := buildOutlineConstraintsForLang(state, idx, lang)
 	memoryContext := buildMemoryForLang(state, idx, lang)
 
-	minLen, maxLen := calcChapterLengthRange(snapshot.TargetWordsPerChapter)
 	targetWords := snapshot.TargetWordsPerChapter
+	if strictWordCount(cfg) {
+		targetWords = cfg.Story.TargetWordsPerChapter
+	}
+	minLen, maxLen := configuredChapterRange(targetWords, cfg)
 
 	userPrompt := config.RenderPrompt(cfg.Prompts.ChapterWriting, map[string]string{
 		"Title":              preferUserValue(cfg.Story.Title, state.Title),
@@ -874,6 +877,11 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	})
 	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.UserFeedback}}", userFeedback)
 	userPrompt += factProtection(state, ch.Num, lang)
+	target := cfg.Story.TargetWordsPerChapter
+	lo, hi := configuredChapterRange(target, cfg)
+	if strictWordCount(cfg) {
+		userPrompt += "\n" + formatChapterLengthRequirementBlock(lo, hi, target, lang)
+	}
 
 	systemPrompt := state.CorePrompt
 	if systemPrompt == "" {
@@ -890,7 +898,11 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	if err != nil {
 		return "", err
 	}
-	return stripChapterMetaProse(content, lang), nil
+	content = stripChapterMetaProse(content, lang)
+	if strictWordCount(cfg) {
+		return recoverChapterLengthBest(ctx, apiCfg, cfg, content, lo, hi, target, proseLengthScore(prose.CountProseUnits(content), lo, hi, target), logger)
+	}
+	return content, nil
 }
 
 func reviseSubsequentOutlines(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, state *Progress, currentIdx int, userFeedback string) error {
@@ -925,11 +937,12 @@ func reviseSubsequentOutlines(ctx context.Context, apiCfg *config.APIConfig, cfg
 		feedbackWrap = fmt.Sprintf("用户对第%d章提出了修改意见：%s\n请仅在该意见影响后续剧情时调整后续章节大纲；若意见只是文字细节修改，请原样返回大纲。", state.Chapters[currentIdx].Num, userFeedback)
 	}
 
-	userPrompt := config.RenderPrompt(cfg.Prompts.OutlineRevision, map[string]string{
+	userPrompt := config.RenderPrompt(cfg.Prompts.OutlineRevision, mergeOutlinePromptData(map[string]string{
 		"CurrentOutline": subsequentChapters,
 		"UserFeedback":   feedbackWrap,
 		"LockedChapters": lockedChapters,
-	})
+	}, cfg, nil))
+	userPrompt = finalizeOutlinePrompt(cfg.Prompts.OutlineRevision, userPrompt, cfg, nil)
 
 	systemPrompt := i18n.SystemPromptFor(lang, "outline_editor_locked_json")
 
@@ -946,7 +959,11 @@ func reviseSubsequentOutlines(ctx context.Context, apiCfg *config.APIConfig, cfg
 
 	for _, newCh := range resp.Chapters {
 		for i, existingCh := range state.Chapters {
-			if existingCh.Num == newCh.Num && existingCh.Status != StatusAccepted {
+			if i > currentIdx && existingCh.Num == newCh.Num && existingCh.Status != StatusAccepted {
+				lo, _ := outlineRange(cfg)
+				if len(validateOutlineChapterLengths([]OutlineChapter{newCh}, lo, lang)) > 0 {
+					continue
+				}
 				state.Chapters[i].Title = newCh.Title
 				state.Chapters[i].Outline = newCh.Outline
 			}
