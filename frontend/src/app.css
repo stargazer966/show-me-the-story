@@ -235,3 +235,11 @@ body {
 .candidate-diff { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin-block: .65rem; }
 .candidate-diff > * { background: var(--color-base-200); border-radius: .35rem; padding: .75rem; overflow-wrap: anywhere; max-height: 27rem; overflow-y: auto; }
 @media (max-width: 760px) { .candidate-diff { grid-template-columns: minmax(0,1fr); } }
+
+.desk-beat-cards { grid-column: 2 / -1; }
+.desk-beat-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+@container (max-width: 52rem) { .desk-beat-cards { grid-column: 1 / -1; } }
+@container (max-width: 36rem) { .desk-beat-fields { grid-template-columns: minmax(0, 1fr); } }
+@media (min-width: 1280px) {
+  .assistant-panel.desktop-hidden { display: none; }
+}

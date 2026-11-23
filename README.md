@@ -144,3 +144,5 @@ Writing can generate and compare a prose candidate for a selected chapter. Delet
 New projects can be opened with one click after choosing Blank story or a template. Project name and premise are optional. Image analysis suggests an editable fictional character name. Story Desk suggests a chapter title and targets 50–100 English words per beat.
 
 Story Desk adopts each newly generated outline automatically. Select an earlier version to switch back. Writing publishes generated prose directly and keeps earlier versions in History. For pacing edits, Revise chapter shows prose block numbers and word counts. Refer to Story Desk beat numbers when asking to shift the chapter's emphasis.
+
+Each Story Desk beat has a draft and optional remarks alongside its generated outline and editable writing instructions. Writing reads the instructions from the adopted version, including local pacing, voice, and viewpoint. Use **Hide assistant** in the top bar to widen the workspace.

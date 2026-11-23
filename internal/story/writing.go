@@ -546,6 +546,7 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 		"OutlineConstraints": outlineConstraints,
 	})
 	userPrompt = finalizeChapterWritingPrompt(cfg.Prompts.ChapterWriting, userPrompt, minLen, maxLen, targetWords, lang)
+	userPrompt += deskWritingGuidance(state, ch, ch.DeskVersion, lang)
 	if block := formatExtraWritingConstraintsBlock(extraWritingConstraints, lang); block != "" {
 		userPrompt += "\n\n" + block
 	}
@@ -858,6 +859,7 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.UserFeedback}}", userFeedback)
 	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.OriginalContent}}", original)
 	userPrompt += revisionPacingContext(state, ch, lang)
+	userPrompt += deskWritingGuidance(state, ch, ch.DeskVersion, lang)
 	userPrompt += factProtection(state, ch.Num, lang)
 	target := cfg.Story.TargetWordsPerChapter
 	lo, hi := configuredChapterRange(target, cfg)

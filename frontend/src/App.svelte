@@ -27,6 +27,9 @@
   let destroyed = false;
   let navigationOpen = false;
   let assistantOpen = false;
+  let assistantDesktop = globalThis.localStorage?.getItem("assistant-desktop-visible") !== "false";
+  let wideWorkspace = false;
+  $: assistantVisible = wideWorkspace ? assistantDesktop : assistantOpen;
   let navigationButton;
   let assistantButton;
 
@@ -112,7 +115,10 @@
   })();
 
   async function sendToChat(text) {
-    if (chatPanel) await chatPanel.sendMessageToChat(text);
+    if (chatPanel) {
+      openAssistant();
+      await chatPanel.sendMessageToChat(text);
+    }
   }
 
   async function backToProjects() {
@@ -137,7 +143,10 @@
     requestAnimationFrame(() => document.querySelector('#workspace-navigation button')?.focus());
   }
   function openAssistant() {
-    assistantOpen = true;
+    if (wideWorkspace) {
+      assistantDesktop = true;
+      localStorage.setItem('assistant-desktop-visible','true');
+    } else assistantOpen = true;
     requestAnimationFrame(() => document.querySelector('#writing-assistant button')?.focus());
   }
   function closeNavigation() {
@@ -146,7 +155,10 @@
     requestAnimationFrame(() => navigationButton?.focus());
   }
   function closeAssistant() {
-    if (!assistantOpen) return;
+    if (wideWorkspace) {
+      assistantDesktop = false;
+      localStorage.setItem('assistant-desktop-visible','false');
+    }
     assistantOpen = false;
     requestAnimationFrame(() => assistantButton?.focus());
   }
@@ -155,9 +167,9 @@
     closeNavigation();
   }
   function handleShellKeydown(event) {
-    if (event.key === 'Escape') { closeNavigation(); closeAssistant(); return; }
+    if (event.key === 'Escape') { closeNavigation(); if(assistantOpen && !wideWorkspace)closeAssistant(); return; }
     if (event.key !== 'Tab') return;
-    const panel = document.getElementById(navigationOpen ? 'workspace-navigation' : assistantOpen ? 'writing-assistant' : '');
+    const panel = document.getElementById(navigationOpen ? 'workspace-navigation' : assistantOpen && !wideWorkspace ? 'writing-assistant' : '');
     if (!panel) return;
     const controls = [...panel.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')];
     if (!controls.length) return;
@@ -165,9 +177,11 @@
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   }
+  let workspaceWidth;
+  $: wideWorkspace=workspaceWidth>=1280;
 </script>
 
-<svelte:window on:keydown={handleShellKeydown} />
+<svelte:window bind:innerWidth={workspaceWidth} on:keydown={handleShellKeydown} />
 
 <div class="app-shell flex flex-col bg-base-300 text-base-content overflow-hidden">
   <!-- Header -->
@@ -218,7 +232,7 @@
       {$uiLocale === 'en' ? $t('app.uiLang.en') : $t('app.uiLang.zh')}
     </button>
     {#if $currentProject}
-      <button bind:this={assistantButton} class="btn btn-outline btn-sm xl:hidden" on:click={openAssistant} aria-expanded={assistantOpen} aria-controls="writing-assistant">{$t('app.assistant')}</button>
+      <button bind:this={assistantButton} class="btn btn-outline btn-sm" on:click={()=>assistantVisible?closeAssistant():openAssistant()} aria-expanded={assistantVisible} aria-controls="writing-assistant">{$t(assistantVisible?'app.hideAssistant':'app.assistant')}</button>
     {/if}
   </header>
 
@@ -233,7 +247,7 @@
     </main>
   {:else}
     <div class="workspace flex flex-1 overflow-hidden">
-      {#if navigationOpen || assistantOpen}
+      {#if navigationOpen || (assistantOpen && !wideWorkspace)}
         <button class="workspace-scrim" aria-label={$t('common.close')} on:click={() => { if (navigationOpen) closeNavigation(); if (assistantOpen) closeAssistant(); }}></button>
       {/if}
       <!-- Left: vertical nav -->
@@ -285,8 +299,8 @@
       </main>
 
       <!-- Right: Chat Panel -->
-      <aside id="writing-assistant" class:drawer-open={assistantOpen} class="assistant-panel flex-1 min-w-72 max-w-md bg-base-200 overflow-hidden" aria-label={$t('app.assistant')}>
-        <button class="btn btn-ghost btn-sm m-2 mb-0 xl:hidden" on:click={closeAssistant}>{$t('common.close')}</button>
+      <aside id="writing-assistant" class:drawer-open={assistantOpen} class:desktop-hidden={!assistantDesktop} class="assistant-panel flex-1 min-w-72 max-w-md bg-base-200 overflow-hidden" aria-label={$t('app.assistant')}>
+        <button class="btn btn-ghost btn-sm m-2 mb-0" on:click={closeAssistant}>{$t('app.hideAssistant')}</button>
         <ChatPanel bind:this={chatPanel} contextPage={$currentPage} />
       </aside>
     </div>

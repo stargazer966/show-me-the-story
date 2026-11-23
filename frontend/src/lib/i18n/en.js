@@ -1,5 +1,16 @@
 // English UI strings. Mirror of zh.js. Missing keys fall back to zh.
 export default {
+  "app.hideAssistant": "Hide assistant",
+  "desk.chapterRemarks": "Chapter remarks",
+  "desk.beatDraft": "Beat draft",
+  "desk.beatRemarks": "Beat remarks (optional)",
+  "desk.beatOutline": "Beat outline",
+  "desk.instructions": "Writing instructions",
+  "desk.addBeat": "Add beat",
+  "desk.removeBeat": "Remove beat",
+  "desk.editOutputs": "Edit outline and instructions",
+  "desk.missingBeat": "Add a beat draft for each remark before generating.",
+
   "flow.revisionBlock": "Block {n} · {words} words",
   "flow.pacingHint": "For pacing changes, use the block numbers shown on the prose and the beat numbers from Story Desk. For example: Compress blocks 1–4 to about 100 words total. Expand Beat 2 to about 300 words.",
 

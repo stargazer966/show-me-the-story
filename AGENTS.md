@@ -190,3 +190,5 @@ graphify explain "<概念>"
 - Quick creation assigns a unique project name when the author leaves it blank. Story Desk candidates carry a suggested title and target 50–100 English words per beat. Outline adoption returns Writing progress in the same response.
 
 - Story Desk generation adopts the latest outline in the same save while retaining earlier versions. Selective prose generation publishes directly to Writing; chapter revision includes numbered prose blocks and the adopted beats for pacing requests.
+
+- Story Desk preserves chapter remarks and ordered beat remarks on the draft and the version that generated them. Adopted outline versions include editable per-beat prose instructions; Writing uses those instructions for generation, revision and source-version comparison.

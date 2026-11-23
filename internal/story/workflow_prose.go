@@ -33,8 +33,8 @@ func DraftProseCandidate(ctx context.Context, model *config.APIConfig, cfg *conf
 		ch.Blocks = append([]Block(nil), ch.Blocks...)
 		SyncChapterBlocks(&ch)
 		refs, _ := retrieveSettings(settings, ch.Outline, settingsContextRunes)
-		data, _ := json.Marshal(map[string]any{"old_outline": versions[ch.DeskProseVersion-1].Lines, "new_outline": ch.Outline, "blocks": ch.Blocks, "story_so_far": buildHistorySummaryForLang(state, idx, cfg.Language), "settings": refs, "style": cfg.Story.WritingStyle, "pov": cfg.Story.WritingPOV})
-		system := "Update the existing chapter for the outline differences only. Preserve voice and paragraph boundaries. Return JSON {\"changes\":[{\"block_id\":1,\"text\":\"replacement paragraph\"}]}. Return only changed blocks. Use the manuscript's language."
+		data, _ := json.Marshal(map[string]any{"old_outline": versions[ch.DeskProseVersion-1].Lines, "new_outline": ch.Outline, "previous_prose_guidance": deskWritingGuidance(state, ch, ch.DeskProseVersion, cfg.Language), "adopted_prose_guidance": deskWritingGuidance(state, ch, ch.DeskVersion, cfg.Language), "blocks": ch.Blocks, "story_so_far": buildHistorySummaryForLang(state, idx, cfg.Language), "settings": refs, "style": cfg.Story.WritingStyle, "pov": cfg.Story.WritingPOV})
+		system := "Update the existing chapter for differences in the outline or prose guidance. Changes in pacing, POV or wording are meaningful even when the plot text is identical. Apply each beat’s guidance only to that beat. Preserve voice outside the requested changes and preserve paragraph boundaries. Return JSON {\"changes\":[{\"block_id\":1,\"text\":\"replacement paragraph\"}]}. Return only changed blocks. Use the manuscript's language."
 		raw, err := llm.CallAPI(ctx, model, system, string(data)+factProtection(state, ch.Num, cfg.Language))
 		if err != nil {
 			return ch, err

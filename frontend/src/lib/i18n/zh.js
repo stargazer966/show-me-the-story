@@ -1,6 +1,17 @@
 // Chinese UI strings. Add a key here whenever a hardcoded Chinese phrase
 // is replaced with $t('...') in a Svelte component.
 export default {
+  "app.hideAssistant": "隐藏助手",
+  "desk.chapterRemarks": "章节备注",
+  "desk.beatDraft": "节拍草稿",
+  "desk.beatRemarks": "节拍备注（可选）",
+  "desk.beatOutline": "节拍大纲",
+  "desk.instructions": "写作指示",
+  "desk.addBeat": "添加节拍",
+  "desk.removeBeat": "移除节拍",
+  "desk.editOutputs": "编辑大纲与写作指示",
+  "desk.missingBeat": "生成前请为每条节拍备注填写节拍草稿。",
+
   "flow.revisionBlock": "第 {n} 段 · {words} 字词",
   "flow.pacingHint": "调整篇幅时请使用正文的段落编号和故事工作台的节拍编号。例如：将第 1–4 段合计压缩至约 100 字，将节拍 2 扩展至约 300 字。",
 

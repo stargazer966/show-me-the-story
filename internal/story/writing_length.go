@@ -320,5 +320,5 @@ func generateChapterContentWithLengthControl(ctx context.Context, apiCfg *config
 		}
 	}
 
-	return recoverChapterLengthBest(ctx, apiCfg, cfg, bestContent, minLen, maxLen, target, bestScore, "", logger)
+	return recoverChapterLengthBest(ctx, apiCfg, cfg, bestContent, minLen, maxLen, target, bestScore, strings.TrimSpace(deskWritingGuidance(state, state.Chapters[idx], state.Chapters[idx].DeskVersion, cfg.Language)), logger)
 }

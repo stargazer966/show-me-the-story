@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"showmethestory/internal/config"
+	"showmethestory/internal/sse"
 	"strings"
 	"testing"
 )
@@ -32,7 +33,7 @@ func TestDeskCandidatesAndExistingProse(t *testing.T) {
 		return v
 	}
 	must(DeskRequest{Action: "open"})
-	draft := DeskDraft{"New", "Enter\nLeave", "Keep it quiet"}
+	draft := DeskDraft{Title: "New", Beats: "Enter\nLeave", Focus: "Keep it quiet"}
 	must(DeskRequest{Action: "save", Draft: draft})
 	preview := must(DeskRequest{Action: "preview"}).(DeskPrompt)
 	must(DeskRequest{Action: "generate"})
@@ -58,7 +59,7 @@ func TestDeskCandidatesAndExistingProse(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := restored.Chapters[0]
-	if ch.Title != "New" || restored.Desk.Parts[0].DeskDraft != draft || ch.Content != "Already written." || ch.Outline != "First expanded\n\nSecond revised" || !ch.DeskEarlierProse {
+	if ch.Title != "New" || !sameDeskDraft(restored.Desk.Parts[0].DeskDraft, draft) || ch.Content != "Already written." || ch.Outline != "First expanded\n\nSecond revised" || !ch.DeskEarlierProse {
 		t.Fatal(ch)
 	}
 	before, _ := json.Marshal(state)
@@ -106,5 +107,42 @@ func TestDeskAdoptsLaterPartWithoutChangingChapterNumbers(t *testing.T) {
 	}
 	if len(p.Chapters) != 2 || p.Chapters[0].Num != 1 || p.Chapters[0].DeskPart != 1 || p.Chapters[1].Num != 2 || p.Chapters[1].DeskPart != 2 || p.Chapters[0].DeskVersion != 1 || p.Chapters[1].DeskVersion != 1 {
 		t.Fatal(p.Chapters)
+	}
+}
+
+func TestDeskBeatGuidanceFlowsToWriting(t *testing.T) {
+	cfg := config.DefaultConfigForLang("en")
+	p := &Progress{Desk: StoryDesk{Parts: []DeskPart{{DeskDraft: DeskDraft{Beats: "Arrive\nDiscover the letter", Focus: "Keep the ending quiet", Remarks: []string{"Brief transition", "Third person through Mara, 40% of chapter"}}}}}}
+	path := filepath.Join(t.TempDir(), "progress.json")
+	model := batchAPI(t, func(prompt string) string {
+		if !strings.Contains(prompt, "Third person through Mara") {
+			t.Error("outline request lost beat remark")
+		}
+		return `{"lines":["Mara arrives.","Mara finds the letter."],"instructions":["Use a brief transition.","Third person through Mara, 40% of chapter."]}`
+	})
+	run := func(r DeskRequest) {
+		t.Helper()
+		r.Part = 1
+		r.Revision = p.Desk.Revision
+		if _, err := RunDesk(context.Background(), path, p, cfg, nil, nil, model, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(DeskRequest{Action: "generate"})
+	run(DeskRequest{Action: "manual_outline", Version: 1, Lines: []string{"Mara arrives.", "Mara finds the letter."}, Instructions: []string{"Use a brief transition.", "Third person through Mara, 45% of chapter."}})
+	ch := p.Chapters[0]
+	if ch.DeskVersion != 2 || !strings.Contains(deskWritingGuidance(p, ch, 2, "en"), "45%") || !strings.Contains(deskWritingGuidance(p, ch, 1, "en"), "40%") {
+		t.Fatal("guidance was not versioned")
+	}
+	model = batchAPI(t, func(prompt string) string {
+		for _, want := range []string{"Prose guidance from the outline version", "45%", "Keep the ending quiet", "Brief transition"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("writing request missing %q", want)
+			}
+		}
+		return "Mara arrived and found the letter."
+	})
+	if _, err := generateChapterContentStream(context.Background(), model, cfg, p, 0, &ProjectSettings{}, "", sse.NewLogBroadcaster()); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -16,15 +16,17 @@ type StoryDesk struct {
 	Parts    []DeskPart `json:"parts"`
 }
 type DeskDraft struct {
-	Title string `json:"title"`
-	Beats string `json:"beats"`
-	Focus string `json:"focus"`
+	Title   string   `json:"title"`
+	Beats   string   `json:"beats"`
+	Focus   string   `json:"focus"`
+	Remarks []string `json:"remarks,omitempty"`
 }
 type DeskVersion struct {
-	Title   string    `json:"title,omitempty"`
-	Source  DeskDraft `json:"source"`
-	Context string    `json:"context,omitempty"`
-	Lines   []string  `json:"lines"`
+	Title        string    `json:"title,omitempty"`
+	Source       DeskDraft `json:"source"`
+	Context      string    `json:"context,omitempty"`
+	Lines        []string  `json:"lines"`
+	Instructions []string  `json:"instructions,omitempty"`
 }
 type DeskPart struct {
 	PreviouslyLinked bool `json:"previously_linked,omitempty"`
@@ -42,6 +44,8 @@ type DeskRequest struct {
 	Comment           string    `json:"comment"`
 	Direction         string    `json:"direction"`
 	PreviousDirection string    `json:"previous_direction"`
+	Lines             []string  `json:"lines"`
+	Instructions      []string  `json:"instructions"`
 	Draft             DeskDraft `json:"draft"`
 }
 type DeskPrompt struct {
@@ -57,6 +61,17 @@ func deskBeats(s string) []string {
 		}
 	}
 	return out
+}
+
+func deskTextAt(values []string, index int) string {
+	if index >= 0 && index < len(values) {
+		return values[index]
+	}
+	return ""
+}
+
+func sameDeskDraft(a, b DeskDraft) bool {
+	return a.Title == b.Title && a.Beats == b.Beats && a.Focus == b.Focus && slices.Equal(a.Remarks, b.Remarks)
 }
 
 // Populate missing links and preserve externally edited chapter outlines in history.
@@ -87,7 +102,7 @@ func syncDesk(p *Progress) bool {
 	return changed
 }
 func deskContext(cfg *config.Config, p *Progress, settings *ProjectSettings, draft DeskDraft) string {
-	refs, _ := retrieveSettings(settings, draft.Beats+"\n"+draft.Focus, settingsContextRunes)
+	refs, _ := retrieveSettings(settings, draft.Beats+"\n"+draft.Focus+"\n"+strings.Join(draft.Remarks, "\n"), settingsContextRunes)
 	b, _ := json.Marshal([]any{cfg.Language, cfg.Story, p.CorePrompt, p.LongTermDirection, refs})
 	return string(b)
 }
@@ -107,18 +122,26 @@ func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, 
 		}
 		history.Chapters = append(history.Chapters, ch)
 	}
-	query := part.Beats + "\n" + part.Focus
+	query := part.Beats + "\n" + part.Focus + "\n" + strings.Join(part.Remarks, "\n")
 	refs, _ := retrieveSettings(settings, query, settingsContextRunes)
 	data := map[string]any{"title": state.Title, "premise": state.CorePrompt, "story": cfg.Story, "long_term_direction": state.LongTermDirection, "part": part.Title, "author_beats": beats, "focus": part.Focus, "previous_chapters": BuildPlanningHistory(&history, query, cfg.Language), "related_settings": refs}
+	data["beat_remarks"] = part.Remarks
+	if cfg.Language == "en" {
+		instructions += " Beat numbers start at 1. The beat_remarks array aligns with author_beats. Keep story events in lines and return a separate instructions array with one string per returned line, in the same order. Convert author remarks into prose-writing instructions for pacing, viewpoint, diction, dialogue, or other treatment. Preserve explicit word counts, proportions, and local POV exceptions. Use an empty string when there is no guidance. Do not invent requirements."
+	} else {
+		instructions += " 节拍从1编号。beat_remarks与author_beats逐项对应。情节写入lines，另返回逐项对应的instructions字符串数组，包含篇幅、视角、措辞、对话等正文写法。保留明确的字数、比例和局部视角要求。无指示时用空字符串，不编造要求。"
+	}
 	count := len(beats)
 	if req.Mode == "update" {
 		if req.Version < 1 || req.Version > len(part.Versions) {
 			return DeskPrompt{}, 0, errors.New("Select the outline to update")
 		}
 		old := part.Versions[req.Version-1]
-		if old.Source == part.DeskDraft && (old.Context == "" || old.Context == deskContext(cfg, state, settings, part.DeskDraft)) {
+		if sameDeskDraft(old.Source, part.DeskDraft) && (old.Context == "" || old.Context == deskContext(cfg, state, settings, part.DeskDraft)) {
 			return DeskPrompt{}, 0, errors.New("The draft has not changed")
 		}
+		data["previous_beat_remarks"] = old.Source.Remarks
+		data["previous_writing_instructions"] = old.Instructions
 		data["previous_author_beats"] = deskBeats(old.Source.Beats)
 		data["previous_focus"] = old.Source.Focus
 		data["previous_outline"] = old.Lines
@@ -140,6 +163,7 @@ func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, 
 		if req.Beat < 0 || req.Beat > len(lines) {
 			return DeskPrompt{}, 0, errors.New("Invalid beat")
 		}
+		data["current_writing_instructions"] = part.Versions[req.Version-1].Instructions
 		data["current_outline"] = lines
 		data["current_outline_title"] = part.Versions[req.Version-1].Title
 		data["revision_request"] = req.Comment
@@ -156,9 +180,9 @@ func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, 
 	system := instructions
 	if req.Comment != "" && req.Beat > 0 {
 		if cfg.Language == "en" {
-			system += " Return only the revised paragraph for the selected beat."
+			system += " Return one outline line and one writing instruction for the selected beat in the JSON."
 		} else {
-			system += " 只返回选中节拍的修订段落。"
+			system += " JSON只包含选中节拍的大纲与写作指示。"
 		}
 	}
 	if addon := FormatSkillsContent(ResolveSkills(skills, cfg.SkillConfig, scope, cfg.Language)); addon != "" {
@@ -250,15 +274,28 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 		part := &next.Desk.Parts[req.Part-1]
 		switch req.Action {
 		case "manual_outline":
-			outline := strings.TrimSpace(req.Comment)
-			if outline == "" {
-				return nil, errors.New("Add outline text")
+			if req.Version < 1 || req.Version > len(part.Versions) {
+				return nil, errors.New("Select an outline version")
 			}
-			title := strings.TrimSpace(part.Title)
-			if title == "" && req.Version > 0 && req.Version <= len(part.Versions) {
-				title = part.Versions[req.Version-1].Title
+			updated := part.Versions[req.Version-1]
+			if req.Lines == nil && req.Instructions == nil && strings.TrimSpace(req.Comment) != "" {
+				req.Lines = strings.Split(strings.TrimSpace(req.Comment), "\n\n")
+				req.Instructions = make([]string, len(req.Lines))
+				if len(req.Lines) == len(updated.Lines) {
+					copy(req.Instructions, updated.Instructions)
+				}
 			}
-			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Title: title, Source: part.DeskDraft, Context: deskContext(cfg, &next, settings, part.DeskDraft), Lines: strings.Split(outline, "\n\n")})
+			if len(req.Lines) != len(updated.Lines) || len(req.Instructions) != len(updated.Lines) {
+				return nil, errors.New("Each beat needs an outline and a writing instruction field")
+			}
+			for _, line := range req.Lines {
+				if strings.TrimSpace(line) == "" {
+					return nil, errors.New("Add outline text for each beat")
+				}
+			}
+			updated.Lines = req.Lines
+			updated.Instructions = req.Instructions
+			part.Versions = append(slices.Clone(part.Versions), updated)
 			changed = true
 		case "save":
 			part.DeskDraft = req.Draft
@@ -285,8 +322,9 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 				return nil, err
 			}
 			var reply struct {
-				Title string   `json:"title"`
-				Lines []string `json:"lines"`
+				Title        string   `json:"title"`
+				Lines        []string `json:"lines"`
+				Instructions []string `json:"instructions"`
 			}
 			if err := json.Unmarshal([]byte(cleanJSONResponse(raw)), &reply); err != nil || len(reply.Lines) != count {
 				return nil, errors.New("Model returned an incomplete outline. Your draft and earlier versions are saved.")
@@ -297,12 +335,28 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 					return nil, errors.New("Model returned an empty beat")
 				}
 			}
+			guidance := make([]string, count)
+			for i := range guidance {
+				guidance[i] = strings.TrimSpace(deskTextAt(reply.Instructions, i))
+				sourceIndex := i
+				if req.Comment != "" && req.Beat > 0 {
+					sourceIndex = req.Beat - 1
+				}
+				if guidance[i] == "" {
+					guidance[i] = deskTextAt(input.Remarks, sourceIndex)
+				}
+			}
 			if req.Mode == "update" {
 				old := part.Versions[req.Version-1]
 				previous, current := deskBeats(old.Source.Beats), deskBeats(input.Beats)
 				if len(previous) == len(old.Lines) && old.Source.Focus == input.Focus && (old.Context == "" || old.Context == deskContext(cfg, &next, settings, input.DeskDraft)) {
 					for i, j := range unchangedBeats(previous, current) {
-						reply.Lines[i] = old.Lines[j]
+						if deskTextAt(old.Source.Remarks, j) == deskTextAt(input.Remarks, i) {
+							reply.Lines[i] = old.Lines[j]
+							if prior := deskTextAt(old.Instructions, j); prior != "" {
+								guidance[i] = prior
+							}
+						}
 					}
 				}
 			}
@@ -310,6 +364,10 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 				lines := slices.Clone(part.Versions[req.Version-1].Lines)
 				lines[req.Beat-1] = reply.Lines[0]
 				reply.Lines = lines
+				previous := make([]string, len(lines))
+				copy(previous, part.Versions[req.Version-1].Instructions)
+				previous[req.Beat-1] = guidance[0]
+				guidance = previous
 			}
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -327,7 +385,7 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 				words := strings.Fields(seed)
 				title = strings.TrimRight(truncateRunes(strings.Join(words[:min(8, len(words))], " "), 60), ".。!?！？")
 			}
-			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Title: title, Source: input.DeskDraft, Context: deskContext(cfg, &next, settings, input.DeskDraft), Lines: reply.Lines})
+			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Title: title, Source: input.DeskDraft, Context: deskContext(cfg, &next, settings, input.DeskDraft), Lines: reply.Lines, Instructions: guidance})
 			changed = true
 		default:
 			return nil, errors.New("Unknown desk action")
