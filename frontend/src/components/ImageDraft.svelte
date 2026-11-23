@@ -13,7 +13,9 @@
  async function analyze(){
    busy=true;
    try{const data=new FormData();data.append('image',file);data.append('panel',panel);
-     result=await (await apiFetch('/api/image-draft',{method:'POST',body:data})).json();savedChar=savedScene=false;
+     result=await (await apiFetch('/api/image-draft',{method:'POST',body:data})).json();
+     name=name.trim() || result.character_name || '';
+     savedChar=savedScene=false;
    }catch(e){addToast(e.message,'error')}finally{busy=false}
  }
  async function save(kind){
@@ -33,7 +35,7 @@
  {#if preview}<img class="max-h-72 object-contain" src={preview} alt={$t('wf.image')}/>{/if}
  <label>{$t('wf.panel')} <select class="select" bind:value={panel} disabled={busy}>{#each ['','top-left','top-right','bottom-left','bottom-right'] as pos}<option value={pos}>{pos||$t('wf.whole')}</option>{/each}</select></label>
  <button class="btn btn-outline" disabled={!file||busy||$taskRunning} on:click={analyze}>{$t('wf.analyze')}</button></div>
- {#if result}<div class="space-y-2"><input class="input w-full" bind:value={name} placeholder={$t('config.char.title')} aria-label={$t('config.char.title')}/>
+ {#if result}<div class="space-y-2"><input class="input w-full" bind:value={name} placeholder={$t('wf.suggestedName')} aria-label={$t('wf.suggestedName')}/>
  <textarea class="textarea w-full" bind:value={result.appearance} aria-label={$t('facts.field.appearance')}></textarea>
  <button class="btn btn-outline btn-sm" disabled={busy||savedChar||$taskRunning||!name.trim()||!result.appearance.trim()} on:click={()=>save('character')}>{$t('wf.saveCharacter')}</button>
  <input class="input w-full" bind:value={result.location_name} aria-label={$t('wf.scenes')}/>

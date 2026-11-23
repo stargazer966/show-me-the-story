@@ -21,6 +21,7 @@ type DeskDraft struct {
 	Focus string `json:"focus"`
 }
 type DeskVersion struct {
+	Title   string    `json:"title,omitempty"`
 	Source  DeskDraft `json:"source"`
 	Context string    `json:"context,omitempty"`
 	Lines   []string  `json:"lines"`
@@ -76,7 +77,7 @@ func syncDesk(p *Progress) bool {
 		if ch.DeskVersion > 0 && ch.DeskVersion <= len(part.Versions) && strings.Join(part.Versions[ch.DeskVersion-1].Lines, "\n\n") == ch.Outline {
 			continue
 		}
-		part.Versions = append(slices.Clone(part.Versions), DeskVersion{Lines: []string{ch.Outline}, Source: part.DeskDraft})
+		part.Versions = append(slices.Clone(part.Versions), DeskVersion{Title: ch.Title, Lines: []string{ch.Outline}, Source: part.DeskDraft})
 		ch.DeskVersion = len(part.Versions)
 		changed = true
 	}
@@ -91,9 +92,9 @@ func deskContext(cfg *config.Config, p *Progress, settings *ProjectSettings, dra
 func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, skills []Skill, part DeskPart, req DeskRequest) (DeskPrompt, int, error) {
 	beats := deskBeats(part.Beats)
 	scope := SkillScopeOutlineGenerate
-	instructions := "Write a chapter outline in English. Expand each supplied beat into complete sentences, in order. Give more space to the author's focus. Begin at the first beat and stop at the last. Only brief introductions, endings and transitions are allowed. Never invent a preceding or following scene. Return JSON with a lines array of strings, one per requested beat."
+	instructions := "Write a chapter outline in English. Expand each supplied beat into complete sentences, in order. Give more space to the author's focus. Begin at the first beat and stop at the last. Only brief introductions, endings and transitions are allowed. Never invent a preceding or following scene. Aim for 50–100 English words per beat. Return JSON with a title string and a lines array containing one string per requested beat. Suggest a short chapter title based on the beats. Preserve the supplied part title when present."
 	if cfg.Language != "en" {
-		instructions = "用中文按顺序将每个节拍扩写为完整的章纲句子，优先照顾作者重点。以首个节拍开始、末个节拍结束，只允许简短过渡，不添加前后场景。返回 JSON，lines 数组每个节拍一个字符串。"
+		instructions = "用中文按顺序将每个节拍扩写为完整的章纲句子，优先照顾作者重点。以首个节拍开始、末个节拍结束，只允许简短过渡，不添加前后场景。每个节拍默认50至100字。返回 JSON，包含简短的 title 和每个节拍一个字符串的 lines 数组。保留作者已填写的分部标题。"
 	}
 	history := *state
 	history.Chapters = nil
@@ -105,8 +106,7 @@ func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, 
 	}
 	query := part.Beats + "\n" + part.Focus
 	refs, _ := retrieveSettings(settings, query, settingsContextRunes)
-	lo, hi := outlineRange(cfg)
-	data := map[string]any{"title": state.Title, "premise": state.CorePrompt, "story": cfg.Story, "long_term_direction": state.LongTermDirection, "part": part.Title, "author_beats": beats, "focus": part.Focus, "previous_chapters": BuildPlanningHistory(&history, query, cfg.Language), "related_settings": refs, "chapter_outline_length": formatOutlineLengthRequirementBlock(lo, hi, cfg.Language)}
+	data := map[string]any{"title": state.Title, "premise": state.CorePrompt, "story": cfg.Story, "long_term_direction": state.LongTermDirection, "part": part.Title, "author_beats": beats, "focus": part.Focus, "previous_chapters": BuildPlanningHistory(&history, query, cfg.Language), "related_settings": refs}
 	count := len(beats)
 	if req.Mode == "update" {
 		if req.Version < 1 || req.Version > len(part.Versions) {
@@ -138,6 +138,7 @@ func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, 
 			return DeskPrompt{}, 0, errors.New("Invalid beat")
 		}
 		data["current_outline"] = lines
+		data["current_outline_title"] = part.Versions[req.Version-1].Title
 		data["revision_request"] = req.Comment
 		count = len(lines)
 		if req.Beat > 0 {
@@ -200,7 +201,11 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 			if outline == "" {
 				return nil, errors.New("Add outline text")
 			}
-			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Source: part.DeskDraft, Context: deskContext(cfg, &next, settings, part.DeskDraft), Lines: strings.Split(outline, "\n\n")})
+			title := strings.TrimSpace(part.Title)
+			if title == "" && req.Version > 0 && req.Version <= len(part.Versions) {
+				title = part.Versions[req.Version-1].Title
+			}
+			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Title: title, Source: part.DeskDraft, Context: deskContext(cfg, &next, settings, part.DeskDraft), Lines: strings.Split(outline, "\n\n")})
 			changed = true
 		case "save":
 			part.DeskDraft = req.Draft
@@ -237,8 +242,8 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 			ch.DeskEarlierProse = ch.Content != "" && ch.DeskProseVersion != req.Version
 			ch.DeskVersion = req.Version
 			ch.Outline = strings.Join(v.Lines, "\n\n")
-			if v.Source.Title != "" {
-				ch.Title = v.Source.Title
+			if title := preferUserValue(v.Source.Title, v.Title); title != "" {
+				ch.Title = title
 			}
 			if ch.Title == "" {
 				ch.Title = fmt.Sprintf("Chapter %d", ch.Num)
@@ -262,6 +267,7 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 				return nil, err
 			}
 			var reply struct {
+				Title string   `json:"title"`
 				Lines []string `json:"lines"`
 			}
 			if err := json.Unmarshal([]byte(cleanJSONResponse(raw)), &reply); err != nil || len(reply.Lines) != count {
@@ -290,7 +296,20 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Source: input.DeskDraft, Context: deskContext(cfg, &next, settings, input.DeskDraft), Lines: reply.Lines})
+			title := preferUserValue(input.Title, strings.TrimSpace(reply.Title))
+			if req.Comment != "" && req.Beat > 0 {
+				title = preferUserValue(input.Title, part.Versions[req.Version-1].Title)
+			}
+			// A legacy model may return only lines, so derive a usable title from the first beat.
+			if title == "" {
+				seed := reply.Lines[0]
+				if beats := deskBeats(input.Beats); len(beats) > 0 {
+					seed = beats[0]
+				}
+				words := strings.Fields(seed)
+				title = strings.TrimRight(truncateRunes(strings.Join(words[:min(8, len(words))], " "), 60), ".。!?！？")
+			}
+			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Title: title, Source: input.DeskDraft, Context: deskContext(cfg, &next, settings, input.DeskDraft), Lines: reply.Lines})
 			changed = true
 		default:
 			return nil, errors.New("Unknown desk action")
@@ -307,7 +326,12 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 	for i, p := range next.Desk.Parts {
 		contexts[i] = deskContext(cfg, &next, settings, p.DeskDraft)
 	}
-	return map[string]any{"desk": next.Desk, "chapters": ProgressView(&next).Chapters, "direction": next.LongTermDirection, "contexts": contexts}, nil
+	view := ProgressView(&next)
+	result := map[string]any{"desk": next.Desk, "chapters": view.Chapters, "direction": next.LongTermDirection, "contexts": contexts}
+	if req.Action == "use" {
+		result["progress"] = view
+	}
+	return result, nil
 }
 
 // Match equal beats in reading order, keeping duplicate beats deterministic.

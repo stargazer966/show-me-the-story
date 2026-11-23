@@ -307,22 +307,16 @@ func (h *Handlers) PostProject(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 		Language string `json:"language"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "missing_project_name")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json")
 		return
 	}
 
 	name := strings.TrimSpace(req.Name)
 	lang := i18n.NormalizeLanguage(req.Language)
 
-	if !validProjectName(name) {
+	if name != "" && !validProjectName(name) {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "project_name_invalid_chars")
-		return
-	}
-
-	projectDir := filepath.Join(h.storysDir(), name)
-	if _, err := os.Stat(projectDir); err == nil {
-		h.writeErrorReq(w, r, http.StatusConflict, "project_exists")
 		return
 	}
 
@@ -340,8 +334,42 @@ func (h *Handlers) PostProject(w http.ResponseWriter, r *http.Request) {
 		cfg = t.Config
 		settings = t.Settings
 		lang = cfg.Language
-		cfg.Story.Title = name
+		if strings.TrimSpace(req.Name) != "" {
+			cfg.Story.Title = name
+		} else {
+			cfg.Story.Title = ""
+		}
 	}
+	if name == "" {
+		base := "Untitled project"
+		if lang == "zh" {
+			base = "未命名项目"
+		}
+		for n := 1; ; n++ {
+			name = base
+			if n > 1 {
+				name = fmt.Sprintf("%s %d", base, n)
+			}
+			_, err := os.Lstat(filepath.Join(h.storysDir(), name))
+			if os.IsNotExist(err) {
+				break
+			}
+			if err != nil {
+				h.writeErrorReq(w, r, 500, "init_project_config_failed", err)
+				return
+			}
+		}
+	}
+
+	projectDir := filepath.Join(h.storysDir(), name)
+	if _, err := os.Lstat(projectDir); err == nil {
+		h.writeErrorReq(w, r, http.StatusConflict, "project_exists")
+		return
+	} else if !os.IsNotExist(err) {
+		h.writeErrorReq(w, r, 500, "init_project_config_failed", err)
+		return
+	}
+
 	cfg.CreatedWithVersion = h.version
 	err := os.MkdirAll(h.storysDir(), 0755)
 	var stage string
@@ -355,8 +383,8 @@ func (h *Handlers) PostProject(w http.ResponseWriter, r *http.Request) {
 	if err == nil && settings != nil {
 		err = story.SaveProjectSettings(filepath.Join(stage, "settings.json"), settings)
 	}
-	if err == nil && req.Premise != "" {
-		err = story.SaveProgress(filepath.Join(stage, "progress.json"), &story.Progress{Phase: "writing", BookStatus: story.BookStatusActive, CorePrompt: req.Premise, Title: cfg.Story.Title})
+	if err == nil {
+		err = story.SaveProgress(filepath.Join(stage, "progress.json"), &story.Progress{Phase: "writing", BookStatus: story.BookStatusActive, CorePrompt: strings.TrimSpace(req.Premise), Title: cfg.Story.Title})
 	}
 	if err == nil {
 		err = os.Rename(stage, projectDir)

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import logo from '../../../docs/show-me-the-story.webp';
   import { api, apiFetch } from '../lib/api.js';
-  import { currentProject, projects, addToast, showConfirm, taskRunning, progress, config, settings, chatSessions, currentChatSession, projectLanguage } from '../lib/stores.js';
+  import { currentProject, projects, addToast, showConfirm, taskRunning, progress, config, settings, chatSessions, currentChatSession, projectLanguage, selectedChapter } from '../lib/stores.js';
   import { t, setLocale } from '../lib/i18n/index.js';
 
   let newProjectName = '';
@@ -49,6 +49,8 @@
     try {
       await api('POST', '/api/projects/select', { name });
       config.set(null);
+      progress.set(null);
+      selectedChapter.set(-1);
       currentProject.set(name);
       // Reload all project data
       try { progress.set(await api('GET', '/api/progress')); } catch (e) {}
@@ -70,14 +72,10 @@
   }
 
   async function createProject() {
-    const name = newProjectName.trim();
-    if (!name) {
-      addToast($t('projects.toast.needName'), 'error');
-      return;
-    }
+    if (creating || $taskRunning) return;
     creating = true;
     try {
-      await api('POST', '/api/projects', { name, language: newProjectLang, template, premise });
+      const {name} = await api('POST', '/api/projects', { name: newProjectName.trim(), language: chosen?.config?.language || newProjectLang, template, premise });
       newProjectName = ''; premise='';
       await loadProjects();
       await selectProject(name);
@@ -153,6 +151,7 @@
         <h3 class="card-title text-base">{$t('projects.create')}</h3>
         <label>{$t('wf.template')} <select class="select w-full" bind:value={template}><option value="">{$t('wf.blank')}</option>{#each templates as item}<option value={item.name}>{item.name}</option>{/each}</select></label>
         {#if chosen}<p class="text-sm">{chosen.config.language.toUpperCase()} · {chosen.config.story.writing_pov} · {chosen.config.story.target_words_per_chapter} {$t('wf.words')} · {chosen.settings.characters?.length||0} {$t('config.char.title')} · {chosen.settings.worldview?.length||0} {$t('wf.scenes')}</p>{/if}
+        <details class="space-y-2"><summary class="cursor-pointer">{$t('wf.projectDetails')}</summary>
         <textarea class="textarea w-full" bind:value={premise} placeholder={$t('wf.premise')} aria-label={$t('wf.premise')}></textarea>
         <input
           type="text"
@@ -163,6 +162,7 @@
           on:keydown={handleKeydown}
           disabled={creating}
         />
+        </details>
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-2">
             <span class="text-xs text-base-content/65">{$t('projects.create.lang')}</span>
@@ -174,12 +174,12 @@
           <button
             class="btn btn-primary btn-sm"
             on:click={createProject}
-            disabled={creating || !newProjectName.trim()}
+            disabled={creating || $taskRunning}
           >
             {#if creating}
               <span class="loading loading-spinner loading-xs"></span>
             {:else}
-              {$t('projects.create.button')}
+              {$t(chosen?'wf.createTemplate':'wf.createBlank')}
             {/if}
           </button>
         </div>

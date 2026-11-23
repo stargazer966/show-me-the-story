@@ -186,3 +186,5 @@ graphify explain "<概念>"
 - Writing candidate adoption checks both the chapter source and candidate identity. Writing prose deletion preserves chapter numbering, desk links and outlines. Writing revision does not automatically replan subsequent chapter outlines.
 - Final proofreading uses a persistent manuscript and settings copy. Interactive report decisions, copyedits and exports operate on that copy. Proofread proposals verify the source chapter revision on adoption.
 - Workflow history stores project checkpoints after saved mutations and model tasks. Scoped restores retain other stage data and whole-project restore uses the progress rollback transaction. Global model credentials live outside project history.
+
+- Quick creation assigns a unique project name when the author leaves it blank. Story Desk candidates carry a suggested title and target 50–100 English words per beat. Outline adoption returns Writing progress in the same response.

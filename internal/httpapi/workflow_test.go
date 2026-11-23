@@ -80,7 +80,7 @@ func TestVisionDraftUsesDedicatedModelAndLeavesRecordsUnsaved(t *testing.T) {
 			return
 		}
 		seen = true
-		fmt.Fprint(w, `{"choices":[{"finish_reason":"stop","message":{"content":"{\"appearance\":\"Blue coat\",\"location_name\":\"Station\",\"scenery\":\"Iron roof\"}"}}]}`)
+		fmt.Fprint(w, `{"choices":[{"finish_reason":"stop","message":{"content":"{\"character_name\":\"Mara\",\"appearance\":\"Blue coat\",\"location_name\":\"Station\",\"scenery\":\"Iron roof\"}"}}]}`)
 	}))
 	defer server.Close()
 	cfg := config.DefaultAPIConfig()
@@ -102,7 +102,38 @@ func TestVisionDraftUsesDedicatedModelAndLeavesRecordsUnsaved(t *testing.T) {
 	req.Header.Set("Content-Type", mp.FormDataContentType())
 	res := httptest.NewRecorder()
 	h.imageDraft(res, req)
-	if res.Code != 200 || !seen || !strings.Contains(res.Body.String(), "Iron roof") || len(h.settings.Characters)+len(h.settings.Worldview) != 0 {
+	if res.Code != 200 || !seen || !strings.Contains(res.Body.String(), "Iron roof") || !strings.Contains(res.Body.String(), `"character_name":"Mara"`) || len(h.settings.Characters)+len(h.settings.Worldview) != 0 {
 		t.Fatal(res.Code, res.Body.String())
+	}
+}
+
+func TestQuickCreateProjectWithoutNameOrPremise(t *testing.T) {
+	h := NewHandlers(config.DefaultAPIConfig(), "", sse.NewLogBroadcaster(), t.TempDir(), "test")
+	defer h.logger.Close()
+	for i, want := range []string{"Untitled project", "Untitled project 2"} {
+		rec := httptest.NewRecorder()
+		h.PostProject(rec, httptest.NewRequest("POST", "/", strings.NewReader(`{"language":"en"}`)))
+		var out struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 || out.Name != want {
+			t.Fatalf("%v: %s", err, rec.Body.String())
+		}
+		if err := h.switchProject(out.Name); err != nil {
+			t.Fatal(err)
+		}
+		if h.state.CorePrompt != "" || h.state.Title != "" || len(h.state.Chapters) != 0 {
+			t.Fatalf("nonblank quick project %d", i)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.saveTemplate(rec, httptest.NewRequest("POST", "/", strings.NewReader(`{"name":"Preset","source":"Untitled project"}`)))
+	if rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.PostProject(rec, httptest.NewRequest("POST", "/", strings.NewReader(`{"language":"en","template":"Preset"}`)))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Untitled project 3") {
+		t.Fatal(rec.Body.String())
 	}
 }

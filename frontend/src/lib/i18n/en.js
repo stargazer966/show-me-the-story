@@ -1,5 +1,10 @@
 // English UI strings. Mirror of zh.js. Missing keys fall back to zh.
 export default {
+  "wf.projectDetails": "Project name and premise (optional)",
+  "wf.createTemplate": "Create from template",
+  "wf.createBlank": "Create blank project",
+  "wf.suggestedName": "Suggested character name",
+
   "flow.generate": "Generate prose",
   "flow.needOutline": "Adopt an outline in Story Desk first.",
   "flow.factLabels": "Show fact labels",
@@ -73,7 +78,7 @@ export default {
   "desk.advanced": "Advanced",
   "desk.language": "Writing language",
   "desk.prose": "Chapter prose",
-  "desk.bounds": "Story Desk follows the supplied beats in order and allows brief transitions.",
+  "desk.bounds": "Story Desk targets 50–100 words per beat. The outline length settings below apply to batch planning.",
   "desk.direction": "Long-term direction",
   "desk.localError": "Local storage unavailable. Save your draft to the project.",
 

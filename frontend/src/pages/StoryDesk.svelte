@@ -1,7 +1,7 @@
 <script>
   import {onMount} from 'svelte';
   import {api} from '../lib/api.js';
-  import {currentProject, progress, settings, addToast} from '../lib/stores.js';
+  import {currentProject, progress, selectedChapter, settings, addToast} from '../lib/stores.js';
   import {t} from '../lib/i18n/index.js';
   import Outline from './Outline.svelte';
   import ImageDraft from '../components/ImageDraft.svelte';
@@ -40,13 +40,25 @@
         if(kind==='preview'){preview=response;return}
         receive(response);version=desk.parts[index].versions.length;beat=0;comment='';
       }else{
-        receive(await request(kind,kind==='manual_outline'?{comment:manual}:{}));
+        const result=await request(kind,kind==='manual_outline'?{comment:manual}:{});
+        receive(result);
         if(kind==='manual_outline'){version=desk.parts[index].versions.length;manual=null}
         if(kind==='add')select(desk.parts.length-1);
-        if(kind==='use')progress.set(await api('GET','/api/progress'));
+        if(kind==='use'){
+          progress.set(result.progress);
+          focusWritingChapter(result.chapters);
+        }
       }
       preview=null;
     }catch(e){error=e.message}finally{busy=false}
+  }
+  function partName(part,i){
+    const adopted=chapters.find(ch=>ch.desk_part===i+1)?.desk_version;
+    return part.title || part.versions?.[(adopted || part.versions.length)-1]?.title || $t('desk.untitled');
+  }
+  function focusWritingChapter(list){
+    const target=list.findIndex(ch=>ch.desk_part===index+1);
+    if(target>=0)selectedChapter.set(target);
   }
   $: part=desk?.parts[index];
   $: candidate=part?.versions?.[version-1];
@@ -72,12 +84,12 @@
 </section>{/if}
 <div class="desk">
 <nav aria-label={$t('desk.parts')} class="space-y-2"><h3 class="font-semibold">{$t('desk.parts')}</h3>
- {#each desk.parts as item,i}<button disabled={busy} class="btn btn-sm w-full justify-start" class:btn-primary={index===i} on:click={()=>select(i)}>{i+1}. {item.title||$t('desk.untitled')}</button>{/each}
+ {#each desk.parts as item,i}<button disabled={busy} class="btn btn-sm w-full justify-start" class:btn-primary={index===i} on:click={()=>select(i)}>{i+1}. {partName(item,i)}</button>{/each}
  <button class="btn btn-outline btn-sm" disabled={busy} on:click={()=>action('add')}>＋ {$t('desk.part')}</button>
 </nav>
 <fieldset disabled={busy} class="card bg-base-200 p-4 space-y-3 min-w-0">
  <h3 class="text-xl font-semibold">{$t('desk.draft')}</h3>
- <label>{$t('desk.title')}<input class="input w-full" value={draft.title} on:input={e=>edit('title',e.target.value)}></label>
+ <label>{$t('desk.title')}<input class="input w-full" value={draft.title} placeholder={candidate?.title||$t('desk.untitled')} on:input={e=>edit('title',e.target.value)}></label>
  <label>{$t('desk.beats')}<textarea rows="8" class="textarea w-full" value={draft.beats} on:input={e=>edit('beats',e.target.value)}></textarea></label>
  <label>{$t('desk.focus')}<textarea rows="3" class="textarea w-full" value={draft.focus} on:input={e=>edit('focus',e.target.value)}></textarea></label>
  <div class="flex items-center gap-2"><button class="btn btn-outline btn-sm" on:click={()=>action('save')}>{$t('desk.save')}</button><small>{dirty?$t('desk.local'):$t('desk.saved')}</small></div>
@@ -87,6 +99,7 @@
  <div class="flex flex-wrap gap-2"><button class="btn btn-primary btn-sm" disabled={!draft.beats.trim()} on:click={()=>action('generate',false,changed?'update':'rewrite')}>{$t(candidate?(changed?'flow.updateOutline':'flow.rewriteOutline'):'desk.generate')}</button>
  <button class="btn btn-outline btn-sm" disabled={!draft.beats.trim()} on:click={()=>action('preview',false,changed?'update':'rewrite')}>{$t('desk.preview')}</button></div>
  {#if candidate}
+ {#if candidate.title}<h4 class="font-semibold">{candidate.source?.title||candidate.title}</h4>{/if}
  <button class="btn btn-outline btn-sm" on:click={()=>manual=candidate.lines.join('\n\n')}>{$t('flow.editOutline')}</button>
  {#if adopted && adopted!==candidate}<button class="btn btn-ghost btn-sm" on:click={()=>compare=!compare}>{$t('flow.compare')}</button>{/if}
  {#if compare&&adopted}<div class="candidate-diff"><p class="whitespace-pre-wrap">{adopted.lines.join('\n\n')}</p><p class="whitespace-pre-wrap">{candidate.lines.join('\n\n')}</p></div>{/if}
@@ -100,7 +113,7 @@
  <textarea class="textarea w-full" rows="2" bind:value={comment} on:input={()=>preview=null}></textarea></label>
  <div class="flex flex-wrap gap-2"><button class="btn btn-outline btn-sm" disabled={!comment.trim()} on:click={()=>action('generate',true)}>{$t('desk.revise')}</button><button class="btn btn-ghost btn-sm" disabled={!comment.trim()} on:click={()=>action('preview',true)}>{$t('desk.preview')}</button>
  {#if beat}<button class="btn btn-ghost btn-sm" on:click={()=>{beat=0;preview=null}}>{$t('desk.whole')}</button>{/if}</div>
- {#if chapter}<a class="link" href="#writing">{$t('desk.write')}</a>{/if}
+ {#if chapter}<a class="link" href="#writing" on:click={()=>focusWritingChapter(chapters)}>{$t('desk.write')}</a>{/if}
  {#if chapter?.desk_earlier_prose && chapter.word_count}<small>{$t('desk.earlier')}</small>{/if}
  {/if}
  {#if busy}<small role="status">{$t('desk.working')}</small>{/if}

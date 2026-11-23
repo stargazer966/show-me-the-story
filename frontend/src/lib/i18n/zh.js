@@ -1,6 +1,11 @@
 // Chinese UI strings. Add a key here whenever a hardcoded Chinese phrase
 // is replaced with $t('...') in a Svelte component.
 export default {
+  "wf.projectDetails": "项目名称和故事前提（可选）",
+  "wf.createTemplate": "从模板创建",
+  "wf.createBlank": "创建空白项目",
+  "wf.suggestedName": "建议角色名",
+
   "flow.generate": "生成正文",
   "flow.needOutline": "请先在故事工作台采用章纲。",
   "flow.factLabels": "显示事实标签",
@@ -74,7 +79,7 @@ export default {
   "desk.advanced": "高级设置",
   "desk.language": "写作语言",
   "desk.prose": "章节正文",
-  "desk.bounds": "故事工作台按顺序展开节拍，只添加简短过渡。",
+  "desk.bounds": "故事工作台默认每个节拍 50–100 字。下方章纲长度设置适用于批次规划。",
   "desk.direction": "全书长期方向",
   "desk.localError": "本地存储不可用，请将草稿保存到项目。",
 

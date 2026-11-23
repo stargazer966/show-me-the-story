@@ -16,7 +16,7 @@ func TestDeskCandidatesAndExistingProse(t *testing.T) {
 	cfg.Language = "en"
 	state := &Progress{Title: "Novel", Phase: "writing", Chapters: []ChapterState{{Num: 1, Title: "Old", Outline: "Legacy outline", Status: StatusAccepted, Content: "Already written."}}}
 	path := filepath.Join(t.TempDir(), "progress.json")
-	answer := `{"lines":["First expanded","Second expanded"]}`
+	answer := `{"title":"Suggested name","lines":["First expanded","Second expanded"]}`
 	var promptSent string
 	model := batchAPI(t, func(user string) string { promptSent = user; return answer })
 	run := func(r DeskRequest) (any, error) {
@@ -36,7 +36,7 @@ func TestDeskCandidatesAndExistingProse(t *testing.T) {
 	must(DeskRequest{Action: "save", Draft: draft})
 	preview := must(DeskRequest{Action: "preview"}).(DeskPrompt)
 	must(DeskRequest{Action: "generate"})
-	if preview.User != promptSent || !strings.Contains(promptSent, "Keep it quiet") || state.Chapters[0].Outline != "Legacy outline" {
+	if preview.User != promptSent || !strings.Contains(preview.System, "50–100 English words per beat") || !strings.Contains(promptSent, "Keep it quiet") || state.Chapters[0].Outline != "Legacy outline" {
 		t.Fatal("preview or isolation failed")
 	}
 	answer = `{"lines":["Second revised"]}`
@@ -54,7 +54,7 @@ func TestDeskCandidatesAndExistingProse(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := restored.Chapters[0]
-	if restored.Desk.Parts[0].DeskDraft != draft || ch.Content != "Already written." || ch.Outline != "First expanded\n\nSecond revised" || !ch.DeskEarlierProse {
+	if ch.Title != "New" || restored.Desk.Parts[0].DeskDraft != draft || ch.Content != "Already written." || ch.Outline != "First expanded\n\nSecond revised" || !ch.DeskEarlierProse {
 		t.Fatal(ch)
 	}
 	before, _ := json.Marshal(state)
@@ -62,5 +62,30 @@ func TestDeskCandidatesAndExistingProse(t *testing.T) {
 	after, _ := json.Marshal(state)
 	if !errors.Is(err, ErrDeskChanged) || string(after) != string(before) {
 		t.Fatal("stale edit affected the desk")
+	}
+}
+
+func TestGeneratedPartTitleAndProgressOnAdoption(t *testing.T) {
+	cfg := config.DefaultConfigForLang("en")
+	p := &Progress{Phase: "outline"}
+	path := filepath.Join(t.TempDir(), "progress.json")
+	model := batchAPI(t, func(string) string { return `{"title":"The Last Train","lines":["Mara waits on the platform."]}` })
+	run := func(r DeskRequest) any {
+		t.Helper()
+		r.Part = 1
+		r.Revision = p.Desk.Revision
+		result, err := RunDesk(context.Background(), path, p, cfg, nil, nil, model, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	run(DeskRequest{Action: "open"})
+	run(DeskRequest{Action: "save", Draft: DeskDraft{Beats: "Wait"}})
+	run(DeskRequest{Action: "generate"})
+	result := run(DeskRequest{Action: "use", Version: 1}).(map[string]any)
+	view := result["progress"].(*Progress)
+	if view.Phase != "writing" || len(view.Chapters) != 1 || view.Chapters[0].Title != "The Last Train" || view.Chapters[0].Status != StatusPending {
+		t.Fatalf("writing did not receive the adopted chapter: %+v", view.Chapters)
 	}
 }

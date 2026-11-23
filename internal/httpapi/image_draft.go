@@ -48,7 +48,7 @@ func (h *Handlers) imageDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg.MaxTokens = 1500
-	prompt := "Describe the visible character and setting in English. Multiple portraits/front/back views of the same subject represent one character. Distinguish scenery from a studio backdrop or transparency grid. Do not invent biography, names, or unseen details. Return a JSON object with string fields appearance, location_name and scenery. Use an empty string for missing details."
+	prompt := "Describe the visible character and setting in English. Multiple portraits/front/back views of the same subject represent one character. Distinguish scenery from a studio backdrop or transparency grid. Suggest a fictional name for the character in character_name. The name is a creative suggestion and must never claim or infer the identity of the person shown. Return a JSON object with string fields character_name, appearance, location_name and scenery. Describe only visible details. Use empty strings for character_name and appearance if there is no character."
 	if h.cfg.Language == "zh" {
 		prompt += " Write the field values in Chinese."
 	}
@@ -71,6 +71,7 @@ func (h *Handlers) imageDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out struct {
+		Name       string `json:"character_name"`
 		Appearance string `json:"appearance"`
 		Location   string `json:"location_name"`
 		Scenery    string `json:"scenery"`
@@ -78,6 +79,10 @@ func (h *Handlers) imageDraft(w http.ResponseWriter, r *http.Request) {
 	if res.FinishReason == "length" || json.Unmarshal([]byte(llm.ExtractJSON(res.Content)), &out) != nil || strings.TrimSpace(out.Appearance+out.Scenery) == "" {
 		h.writeErrorReq(w, r, 502, "invalid_request", "The model returned an incomplete image description")
 		return
+	}
+	out.Name = strings.TrimSpace(out.Name)
+	if strings.TrimSpace(out.Appearance) == "" {
+		out.Name = ""
 	}
 	h.writeJSON(w, 200, out)
 }

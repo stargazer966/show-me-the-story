@@ -140,3 +140,5 @@ Open Story Desk, add one part per chapter, enter one beat per line and save the 
 
 ### Versioned workflow
 Writing can generate and compare a prose candidate for a selected chapter. Deleting prose leaves its outline available. History records saved project changes and can restore a draft, outline, chapter prose, settings, proofreading work, or the whole project. Final proofreading creates its own manuscript copy. Report decisions and approved copyedits stay in that copy, which can be exported separately.
+
+New projects can be opened with one click after choosing Blank story or a template. Project name and premise are optional. Image analysis suggests an editable fictional character name. Story Desk suggests a chapter title and targets 50–100 English words per beat.

@@ -71,6 +71,11 @@
   const OUTLINE_FOCUS_KEY = 'showmethestory.outlineFocusChapter';
 
   onMount(async () => {
+    // Refresh after entering Writing, including when navigation happened during outline adoption.
+    const before = $progress;
+    api('GET', '/api/progress').then(value => {
+      if ($progress === before) progress.set(value);
+    }).catch(() => {});
     try {
       const res = await api('GET', '/api/autoconfirm');
       autoConfirm.set(!!res.enabled);
@@ -94,7 +99,7 @@
   }
 
   $: p = $progress;
-  $: inWriting = p?.phase === 'writing';
+  $: inWriting = p?.phase === 'writing' || chapters.some(c => !c.inherited && !!c.outline?.trim());
   $: chapters = p?.chapters || [];
   $: projectChapters = chapters.filter(c => !c.inherited);
   $: total = projectChapters.length;
@@ -103,7 +108,7 @@
   $: currentIdx = p?.current_chapter_index ?? 0;
 
   // 默认选中当前章节
-  $: if (inWriting && ($selectedChapter < 0 || $selectedChapter >= chapters.length)) {
+  $: if (inWriting && chapters.length && ($selectedChapter < 0 || $selectedChapter >= chapters.length)) {
     selectedChapter.set(Math.min(currentIdx, chapters.length - 1));
   }
 
