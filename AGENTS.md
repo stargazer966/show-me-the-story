@@ -192,3 +192,5 @@ graphify explain "<概念>"
 - Story Desk generation adopts the latest outline in the same save while retaining earlier versions. Selective prose generation publishes directly to Writing; chapter revision includes numbered prose blocks and the adopted beats for pacing requests.
 
 - Story Desk preserves chapter remarks and ordered beat remarks on the draft and the version that generated them. Adopted outline versions include editable per-beat prose instructions; Writing uses those instructions for generation, revision and source-version comparison.
+
+- Story Desk uses a compact part and version toolbar followed by the beat editor. Chapter-level settings and revision controls open on demand; beat input and output stack when the workspace is narrow.

@@ -1,5 +1,7 @@
 // English UI strings. Mirror of zh.js. Missing keys fall back to zh.
 export default {
+  "desk.chapterSettings": "Chapter settings",
+  "desk.reviseOutline": "Revise outline",
   "app.hideAssistant": "Hide assistant",
   "desk.chapterRemarks": "Chapter remarks",
   "desk.beatDraft": "Beat draft",

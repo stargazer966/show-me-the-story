@@ -1,6 +1,8 @@
 // Chinese UI strings. Add a key here whenever a hardcoded Chinese phrase
 // is replaced with $t('...') in a Svelte component.
 export default {
+  "desk.chapterSettings": "章节设置",
+  "desk.reviseOutline": "修订大纲",
   "app.hideAssistant": "隐藏助手",
   "desk.chapterRemarks": "章节备注",
   "desk.beatDraft": "节拍草稿",
