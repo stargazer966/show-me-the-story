@@ -134,3 +134,6 @@ See [AGENTS.md](AGENTS.md) for architecture and contribution constraints, and th
 ## License
 
 [MIT](LICENSE)
+
+### Story Desk
+Open Story Desk, add one part per chapter, enter one beat per line and save the draft. Preview the model request or roll an outline candidate. Adopt a version to send it to Writing. Revision comments can target a chapter or a single beat. Batch planning remains available in its own tab.

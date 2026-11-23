@@ -31,7 +31,8 @@ const (
 func projectWriteMiddleware(next http.Handler) http.Handler {
 	var mu sync.Mutex
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") && (r.Method != http.MethodGet || strings.HasSuffix(r.URL.Path, "/backup")) {
+		// Task cancellation only signals the context and must reach in-flight model calls.
+		if r.URL.Path != "/api/task/stop" && strings.HasPrefix(r.URL.Path, "/api/") && (r.Method != http.MethodGet || strings.HasSuffix(r.URL.Path, "/backup")) {
 			mu.Lock()
 			defer mu.Unlock()
 		}

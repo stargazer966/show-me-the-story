@@ -8,7 +8,7 @@
   import TaskTokenBadge from './components/TaskTokenBadge.svelte';
   import Projects from './pages/Projects.svelte';
   import Config from './pages/Config.svelte';
-  import Outline from './pages/Outline.svelte';
+  import Outline from './pages/StoryDesk.svelte';
   import Writing from './pages/Writing.svelte';
   import Proofread from './pages/Proofread.svelte';
   import Relations from './pages/Relations.svelte';
@@ -264,7 +264,7 @@
         {#if $currentPage === 'config'}
           <Config {sendToChat} />
         {:else if $currentPage === 'outline'}
-          <Outline />
+          {#key $currentProject}<Outline />{/key}
         {:else if $currentPage === 'writing'}
           <Writing />
         {:else if $currentPage === 'proofread'}

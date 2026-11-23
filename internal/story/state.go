@@ -10,6 +10,10 @@ import (
 )
 
 type ChapterState struct {
+	DeskPart         int    `json:"desk_part,omitempty"`
+	DeskVersion      int    `json:"desk_version,omitempty"`
+	DeskProseVersion int    `json:"desk_prose_version,omitempty"`
+	DeskEarlierProse bool   `json:"desk_earlier_prose,omitempty"`
 	KnowledgeTracked bool   `json:"knowledge_tracked,omitempty"`
 	MemoryRevision   string `json:"memory_revision,omitempty"`
 	Inherited        bool   `json:"inherited,omitempty"`
@@ -105,6 +109,7 @@ type MemoryEntry struct {
 }
 
 type Progress struct {
+	Desk                        StoryDesk                `json:"story_desk,omitzero"`
 	NextMemoryID                int                      `json:"next_memory_id,omitempty"`
 	OutlineBatches              []OutlineBatch           `json:"outline_batches,omitempty"`
 	Phase                       string                   `json:"phase"`

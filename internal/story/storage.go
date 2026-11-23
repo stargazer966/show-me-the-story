@@ -368,6 +368,7 @@ func ResetProgressFiles(progressPath string) error {
 // responses.
 func ProgressView(p *Progress) *Progress {
 	cp := *p
+	cp.Desk = StoryDesk{}
 	cp.Chapters = make([]ChapterState, len(p.Chapters))
 	for i, ch := range p.Chapters {
 		if ch.Content != "" {

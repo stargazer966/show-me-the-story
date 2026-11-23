@@ -762,12 +762,19 @@ func (h *Handlers) DeleteProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := story.ResetProgressFiles(h.progressPath); err != nil {
+	fresh := &story.Progress{Phase: "outline", Desk: h.state.Desk}
+	var err error
+	if len(fresh.Desk.Parts) > 0 {
+		err = story.SaveProgress(h.progressPath, fresh)
+	} else {
+		err = story.ResetProgressFiles(h.progressPath)
+	}
+	if err != nil {
 		h.writeErrorReq(w, r, http.StatusInternalServerError, "delete_progress_failed", err.Error())
 		return
 	}
 
-	h.state = &story.Progress{Phase: "outline"}
+	h.state = fresh
 	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
 }
 

@@ -192,6 +192,8 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 		if content == "" {
 			return fmt.Errorf("正文生成失败或被取消")
 		}
+		ch.DeskProseVersion = ch.DeskVersion
+		ch.DeskEarlierProse = false
 		ch.Content = content
 		logger.InfoKey("log.prose_done", prose.CountProseUnits(content))
 

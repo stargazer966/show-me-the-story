@@ -63,6 +63,7 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("DELETE /api/progress", h.DeleteProgress)
 	mux.HandleFunc("GET /api/status", h.GetStatus)
 
+	mux.HandleFunc("POST /api/story-desk", h.storyDesk)
 	mux.HandleFunc("POST /api/outline/revise", h.PostOutlineRevise)
 	mux.HandleFunc("POST /api/outline/generate-continuation", h.PostOutlineGenerateContinuation)
 	mux.HandleFunc("POST /api/story/complete", h.PostStoryComplete)

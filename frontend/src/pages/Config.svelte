@@ -1,4 +1,11 @@
 <script>
+ import Skills from './Skills.svelte';
+ import {currentProject} from '../lib/stores.js';
+ let section=sessionStorage.getItem('story-settings-tab')||'style';
+ sessionStorage.removeItem('story-settings-tab');
+ let direction, directionSnapshot;
+ $: if(($progress?.long_term_direction||'')!==directionSnapshot){directionSnapshot=$progress?.long_term_direction||'';direction=directionSnapshot}
+ async function saveDirection(){try{await api('POST','/api/story-desk',{project:$currentProject,action:'direction',direction,previous_direction:directionSnapshot});progress.set(await api('GET','/api/progress'));addToast($t('common.save'),'success')}catch(e){addToast(e.message,'error')}}
  import ImageDraft from "../components/ImageDraft.svelte";
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
@@ -448,17 +455,30 @@
 
 <div class="space-y-3">
   <ConfigChangePanel />
-  <!-- API + Story Config: side by side -->
-  <div class="grid grid-cols-1 @3xl:grid-cols-2 gap-4">
+  <h2 class="text-2xl font-semibold">{$t('nav.config')}</h2>
+  <div class="settings-layout"><nav class="flex flex-wrap gap-1 content-start" aria-label={$t('nav.config')}>
+  {#each ['style','length','cast','skills','models'] as id}<button class="btn btn-sm justify-start" class:btn-primary={section===id} on:click={()=>section=id}>{$t('desk.'+id)}</button>{/each}
+  </nav><section class="space-y-3 min-w-0">
+  {#if section==='models'}
     <div class="card bg-base-200">
       <div class="card-body p-4 gap-2">
         <h3 class="card-title text-base">{$t('config.api.title')}</h3>
-        <details><summary class="cursor-pointer">{$t('wf.vision')}</summary><div class="grid gap-2 mt-2"><label>Endpoint <input class="input w-full" bind:value={localApiCfg.vision_url} placeholder="http://localhost:8080/v1"/></label><label>{$t('config.api.model')} <input class="input w-full" bind:value={localApiCfg.vision_model}/></label><label>API key <input class="input w-full" type="password" bind:value={localApiCfg.vision_key}/></label></div></details>
-        <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+        <details class="border-b border-base-300 pb-2"><summary class="cursor-pointer">{$t('wf.vision')}</summary><div class="grid gap-2 mt-2"><label>Endpoint <input class="input w-full" bind:value={localApiCfg.vision_url} placeholder="http://localhost:8080/v1"/></label><label>{$t('config.api.model')} <input class="input w-full" bind:value={localApiCfg.vision_model}/></label><label>API key <input class="input w-full" type="password" bind:value={localApiCfg.vision_key}/></label></div></details>
+        <h4 class="font-semibold">{$t('desk.textModel')}</h4><div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
           <div class="col-span-2">
             <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.api.baseUrl')}</span>
             <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.openai.com/v1" disabled={$taskRunning || testingApi} />
-            <label class="label cursor-pointer justify-start gap-2 py-1 px-0 min-h-0">
+          </div>
+          <div>
+            <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.api.model')}</span>
+            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi} />
+          </div>
+          <div class="col-span-2">
+            <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.api.key')}</span>
+            <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi} />
+          </div>
+        </div>
+        <details><summary>{$t('desk.advanced')}</summary>            <label class="label cursor-pointer justify-start gap-2 py-1 px-0 min-h-0">
               <input type="checkbox" class="toggle toggle-xs" bind:checked={localApiCfg.url_strict} disabled={$taskRunning || testingApi} />
               <span class="text-xs text-base-content/60">{$t('config.api.urlStrict')}</span>
             </label>
@@ -468,11 +488,6 @@
                 {$t('config.api.resolvedUrl')}: <code class="font-mono text-primary/80">{resolvedChatURL}</code>
               </p>
             {/if}
-          </div>
-          <div>
-            <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.api.model')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi} />
-          </div>
           <div>
             <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.api.timeout')}</span>
             <input type="number" class="input input-sm w-full" bind:value={localApiCfg.http_timeout_seconds} disabled={$taskRunning || testingApi} />
@@ -481,11 +496,7 @@
             <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.api.maxTokens')}</span>
             <input type="number" class="input input-sm w-full" bind:value={localApiCfg.max_tokens} placeholder="{$t('config.api.maxTokens.placeholder')}" disabled={$taskRunning || testingApi} title={$t('config.api.maxTokens.tooltip')} />
           </div>
-          <div class="col-span-2">
-            <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.api.key')}</span>
-            <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi} />
-          </div>
-        </div>
+</details>
         {#if $apiTestResult}
           <div class="text-xs rounded-md border px-2.5 py-1.5 {$apiTestResult.ok ? 'border-success/40 bg-success/10 text-success' : 'border-error/40 bg-error/10 text-error'}">
             {#if $apiTestResult.ok}
@@ -508,15 +519,18 @@
       </div>
     </div>
 
+    {:else if section==='style'||section==='length'}
     <div class="card bg-base-200">
       <div class="card-body p-4 gap-2">
-        <h3 class="card-title text-base">{$t('config.story.title')}</h3>
+        <h3 class="card-title text-base">{$t(section==='style'?'desk.style':'desk.length')}</h3>
         {#if hasAccepted}
           <div class="alert alert-warning text-xs py-1.5 px-3">
             <span>{$t('config.story.acceptedHint')}</span>
           </div>
         {/if}
         <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+          {#if section==='style'}
+          <div class="col-span-2">{$t('desk.language')} · {$config?.language==='en'?'English':'中文'}</div>
           <div>
             <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.story.type')}</span>
             <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.type} placeholder={$t('config.story.type.placeholder')} disabled={$taskRunning} />
@@ -525,22 +539,26 @@
             <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.story.titleField')}</span>
             <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.title} placeholder={$t('config.story.title.placeholder')} disabled={$taskRunning} />
           </div>
+          {:else}
+          <h4 class="font-semibold col-span-2">{$t('desk.prose')}</h4>
           <div>
             <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.story.targetWords')}</span>
             <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.target_words_per_chapter} disabled={$taskRunning} />
           </div>{#if $config?.language==='en'}
+          <label>{$t('wf.tolerance')} <input class="input input-sm w-full" type="number" min="1" max="100" bind:value={localStoryCfg.word_tolerance} placeholder="10"/></label>
+          <h4 class="font-semibold col-span-2">{$t('desk.outline')}</h4><p class="col-span-2 text-sm">{$t('desk.bounds')}</p>
           <label>{$t('wf.detail')} <select class="select select-sm w-full" value={(localStoryCfg.outline_min||200)===200 && (localStoryCfg.outline_max||350)===350?'detailed':localStoryCfg.outline_min===80 && localStoryCfg.outline_max===140?'standard':'custom'} on:change={e=>{const mode=e.currentTarget.value;if(mode!=='custom'){localStoryCfg.outline_min=mode==='standard'?80:200;localStoryCfg.outline_max=mode==='standard'?140:350}}}>{#each ['standard','detailed','custom'] as mode}<option value={mode}>{$t('wf.'+mode)}</option>{/each}</select></label>
           <label>{$t('wf.outlineMin')} <input class="input input-sm w-full" type="number" min="1" bind:value={localStoryCfg.outline_min} placeholder="200"/></label>
           <label>{$t('wf.outlineMax')} <input class="input input-sm w-full" type="number" min="1" bind:value={localStoryCfg.outline_max} placeholder="350"/></label>
-          <label>{$t('wf.tolerance')} <input class="input input-sm w-full" type="number" min="1" max="100" bind:value={localStoryCfg.word_tolerance} placeholder="10"/></label>{/if}
+          {/if}{/if}
         </div>
         <div class="flex justify-end">
           <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
         </div>
       </div>
     </div>
-  </div>
-
+  {#if section==='style'}
+  <label class="block">{$t('desk.direction')}<textarea class="textarea w-full" bind:value={direction}></textarea></label><button class="btn btn-outline btn-sm" disabled={$taskRunning || direction===directionSnapshot} on:click={saveDirection}>{$t('common.save')}</button>
   <!-- Writing Style & POV -->
   <div class="card bg-base-200">
     <div class="card-body p-4 gap-2">
@@ -559,6 +577,9 @@
     </div>
   </div>
 
+  {/if}
+  {:else if section==='skills'}<Skills/>
+  {:else}
   <ImageDraft/>
   <!-- Characters -->
   <div class="card bg-base-200">
@@ -879,4 +900,5 @@
       {/if}
     </div>
   </div>
+{/if}</section></div>
 </div>

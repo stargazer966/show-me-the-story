@@ -180,3 +180,5 @@ graphify explain "<概念>"
 - 裸文本 Skill 在导入预览时补齐清单，多个候选入口交由作者选定。已带清单的 Skill 仍走原校验与安装流程。
 - 图片只在分析请求中发送给配置的视觉端点。角色外貌和地理设定草稿分别由作者保存。不同视觉端点使用独立凭据。
 - 手动整章删除按章号预览并校验版本，保留其他章的正文与块 ID。涉及的设定、校订和 Markdown 副本使用 v2 回滚日志与章节文件一起提交；v1 普通保存日志继续兼容。
+
+- Story Desk stores author drafts and append-only outline candidates in project progress. Chapter links use stable part identities across renumbering. Adoption updates only the linked outline; model failure must leave the draft, previous versions and prose intact. The preview and generation share the same message builder and action-scoped skills.

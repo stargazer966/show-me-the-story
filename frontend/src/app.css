@@ -203,3 +203,7 @@ body {
 .graph-container canvas {
   display: block;
 }
+
+.desk{display:grid;grid-template-columns:minmax(8rem,.48fr) minmax(0,1fr) minmax(0,1.25fr);gap:.8rem;align-items:start}.desk label{display:block}.desk label input,.desk label textarea{display:block;margin-top:.35rem}@container (max-width:52rem){.desk{grid-template-columns:1fr 1fr}.desk nav{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem}.desk nav button{width:auto;margin:0}}@container (max-width:36rem){.desk{grid-template-columns:1fr}}
+
+.settings-layout{display:grid;grid-template-columns:minmax(8rem,10rem) minmax(0,1fr);gap:1rem}.settings-layout nav{flex-direction:column}@container (max-width:44rem){.settings-layout{display:block}.settings-layout nav{flex-direction:row;margin-bottom:1rem}}
