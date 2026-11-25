@@ -5,24 +5,38 @@
   import { t } from '../lib/i18n/index.js';
 
   $: pp = $postprocess?.state || $postprocess || {};
-  $: complete = $progress?.book_status === 'completed';
+  $: complete = !!pp.has_copy || $progress?.book_status === 'completed';
   let downloadedBook = false, downloadedOutline = false, backupChecked = false;
   let preferences = '', selectedStatus = 'all', selectedCategory = 'all';
   let chapter = null, highlighted = 0, selectedBlock = 0, editing = 0, editText = '', insertAfter = 0, insertText = '';
-  let continuationName = '';
+  let continuationName = '', activeIssue = null, note = '', issueBusy = false;
 
   async function load() {
     try { const value = await api('GET', '/api/proofread'); postprocess.set({ book_complete: complete, state: value }); preferences = value.author_requirements || ''; }
     catch (e) { addToast(e.message, 'error'); }
   }
   onMount(load);
+  $: selectedIssue=(pp.issues||[]).find(i=>i.id===activeIssue);
+  $: results=pp.proposed?.length?pp.proposed:(pp.revisions||[]);
+  $: stale=pp.chapters?.find(c=>c.num===chapter?.num)?.stale;
+  async function openChapter(num){
+    try{chapter=await api('GET','/api/proofread/chapters/'+num);activeIssue=null; editing=0;selectedBlock=0;highlighted=0;}
+    catch(e){addToast(e.message,'error')}
+  }
+  async function adopt(revision){
+    try{const value=await api('POST','/api/proofread/chapters/'+revision.chapter_num+'/adopt',{}, {'If-Match':revision.after_rev});postprocess.set(value); await openChapter(revision.chapter_num)}
+    catch(e){addToast(e.message,'error')}
+  }
+  async function syncChapter(num){
+    confirmModal.set({message:$t('flow.syncConfirm'),onConfirm:async()=>{try{postprocess.set(await api('POST','/api/proofread/chapters/'+num+'/sync'));await openChapter(num)}catch(e){addToast(e.message,'error')}}});
+  }
 
   async function download(url, mark) {
     try {
       const r = await apiFetch(url);
       const blob = await r.blob(), a = document.createElement('a'); a.href = URL.createObjectURL(blob);
       const base = $config?.story?.title || $progress?.title || 'novel';
-      a.download = url.includes('outline') ? `${base}-outlines.md` : url.includes('proofread') ? `${base}-proofreading-report.md` : `${base}.txt`;
+      a.download = url.includes('outline') ? `${base}-outlines.md` : url.endsWith('/prose') ? `${base}-proofread.txt` : url.includes('proofread') ? `${base}-proofreading-report.md` : `${base}.txt`;
       a.click(); URL.revokeObjectURL(a.href); mark();
     } catch (e) { addToast(e.message, 'error'); }
   }
@@ -33,21 +47,49 @@
 
   $: filtered = (pp.issues || []).filter(i => (selectedStatus === 'all' || i.status === selectedStatus) && (selectedCategory === 'all' || i.category === selectedCategory));
   $: categories = [...new Set((pp.issues || []).map(i => i.category))];
-  $: revisedBlocks = (pp.revisions || []).reduce((n, revision) => n + (revision.changes || []).length, 0);
+  $: revisedBlocks = results.reduce((n, revision) => n + (revision.changes || []).length, 0);
   function selectBlock(id) {
     if (editing || insertAfter) return;
     highlighted = 0;
     selectedBlock = selectedBlock === id ? 0 : id;
   }
-  async function jump(a) {
-    try { chapter = await api('GET','/api/chapters/'+a.chapter_num); const block=(chapter.blocks||[]).find(b=>b.id===a.block_id); if(!block){addToast($t('proofread.anchorMissing'),'warning');return;} if(a.content_rev&&chapter.content_rev&&a.content_rev!==chapter.content_rev)addToast($t('proofread.reportOutdated'),'warning'); selectedBlock = 0; highlighted = a.block_id; await tick(); document.getElementById('proofread-block-'+a.block_id)?.scrollIntoView({block:'center',behavior:'smooth'}); }
-    catch(e) { addToast(e.message,'error'); }
+  async function selectIssue(issue, anchor = issue.anchors?.[0]) {
+    if (issueBusy || editing || insertAfter) return;
+    activeIssue = issue.id;
+    note = issue.decision_note || '';
+    highlighted = selectedBlock = 0;
+    if (!anchor) return;
+    issueBusy = true;
+    try {
+      chapter = await api('GET', '/api/proofread/chapters/' + anchor.chapter_num);
+      if (!chapter.blocks?.some(block => block.id === anchor.block_id)) {
+        addToast($t('proofread.anchorMissing'), 'warning');
+        return;
+      }
+      if (anchor.content_rev && chapter.content_rev && anchor.content_rev !== chapter.content_rev) {
+        addToast($t('proofread.reportOutdated'), 'warning');
+      }
+      highlighted = anchor.block_id;
+      await tick();
+      document.getElementById('proofread-block-' + anchor.block_id)?.scrollIntoView({ block: 'nearest' });
+    } catch (e) { addToast(e.message, 'error'); }
+    finally { issueBusy = false; }
   }
-  async function setStatus(issue,status) { try { const value=await api('PUT','/api/proofread/issues/'+encodeURIComponent(issue.id),{status}); postprocess.set({book_complete:true,state:value}); } catch(e){addToast(e.message,'error');} }
+  async function setStatus(issue, status) {
+    issueBusy = true;
+    try {
+      const value = await api('PUT', '/api/proofread/issues/' + encodeURIComponent(issue.id), { status, note });
+      postprocess.set({ book_complete: true, state: value });
+      const next = filtered.find(item => item.id !== issue.id && item.status === 'pending');
+      issueBusy = false;
+      if (next && selectedStatus !== 'resolved' && selectedStatus !== 'ignored') await selectIssue(next);
+    } catch (e) { addToast(e.message, 'error'); }
+    finally { issueBusy = false; }
+  }
   async function saveBlock(id) { try { chapter=await api('PUT',`/api/proofread/chapters/${chapter.num}/blocks/${id}`,{text:editText}); editing=0; await load(); } catch(e){addToast(e.message,'error');} }
   async function deleteBlock(id) { confirmModal.set({message:$t('proofread.deleteConfirm'),onConfirm:async()=>{try{chapter=await api('DELETE',`/api/proofread/chapters/${chapter.num}/blocks/${id}`);await load();}catch(e){addToast(e.message,'error');}}}); }
   async function addBlock() { try { chapter=await api('POST',`/api/proofread/chapters/${chapter.num}/blocks`,{after_id:insertAfter,text:insertText}); insertAfter=0;insertText='';await load(); } catch(e){addToast(e.message,'error');} }
-  async function undo(num) { try { const value=await api('POST','/api/proofread/undo/'+num);postprocess.set({book_complete:true,state:value});chapter=await api('GET','/api/chapters/'+num); }catch(e){addToast(e.message,'error');} }
+  async function undo(num) { try { const value=await api('POST','/api/proofread/undo/'+num);postprocess.set({book_complete:true,state:value});chapter=await api('GET','/api/proofread/chapters/'+num); }catch(e){addToast(e.message,'error');} }
   async function createContinuation() {
     const name=continuationName.trim(); if(!name)return;
     try { await api('POST','/api/projects/continue',{name}); await api('POST','/api/projects/select',{name}); window.location.hash='#outline'; window.location.reload(); }
@@ -57,7 +99,7 @@
 
 {#if !complete}
   <div class="alert alert-info">{$t('proofread.completeRequired')}</div>
-{:else if !pp.backup_acknowledged}
+{:else if !pp.has_copy}
   <div class="card bg-base-200"><div class="card-body max-w-2xl">
     <h2 class="card-title">{$t('proofread.backupTitle')}</h2><p class="text-sm">{$t('proofread.backupHint')}</p>
     <div class="flex gap-2"><button class="btn btn-primary btn-sm" on:click={()=>download('/api/export/txt',()=>downloadedBook=true)}>{$t('proofread.downloadBook')}</button><button class="btn btn-primary btn-sm" on:click={()=>download('/api/export/outline',()=>downloadedOutline=true)}>{$t('proofread.downloadOutline')}</button></div>
@@ -69,6 +111,7 @@
     <div class="card bg-base-200"><div class="card-body p-4 gap-3">
       <div class="flex gap-2 items-center flex-wrap"><h2 class="card-title flex-1">{$t('proofread.title')}</h2><button class="btn btn-outline btn-sm" on:click={()=>download('/api/export/txt',()=>{})}>{$t('proofread.downloadBook')}</button><button class="btn btn-outline btn-sm" on:click={()=>download('/api/export/outline',()=>{})}>{$t('proofread.downloadOutline')}</button><button class="btn btn-outline btn-sm" on:click={()=>download('/api/proofread/export',()=>{})}>{$t('proofread.downloadReport')}</button></div>
       <p class="text-xs opacity-60">{$t('proofread.boundary')}</p>
+      <button class="btn btn-outline btn-sm w-fit" on:click={()=>download('/api/proofread/prose',()=>{})}>{$t('flow.exportProof')}</button>
       <textarea class="textarea textarea-bordered textarea-sm w-full" bind:value={preferences} placeholder={$t('proofread.preferences')}></textarea>
       <div class="flex gap-2"><button class="btn btn-primary btn-sm" disabled={$taskRunning} on:click={applyAll}>{$t('proofread.apply')}</button><button class="btn btn-outline btn-sm" disabled={$taskRunning} on:click={analyze}>{$t('proofread.analyze')}</button></div>
       {#if Object.keys(pp.apply_errors||{}).length}<div class="alert alert-warning text-xs">{$t('proofread.someFailed')}</div>{/if}
@@ -77,10 +120,10 @@
     {#if pp.proofread_applied_at}
       <div class="card bg-base-200"><div class="card-body p-4 gap-3">
         <h3 class="font-bold">{$t('proofread.resultTitle')}</h3>
-        {#if (pp.revisions || []).length}
-          <p class="text-sm">{$t('proofread.resultSummary', {chapters:(pp.revisions || []).length, blocks:revisedBlocks})}</p>
+        {#if results.length}
+          <p class="text-sm">{$t('proofread.resultSummary', {chapters:results.length, blocks:revisedBlocks})}</p>
           <div class="space-y-2">
-            {#each pp.revisions || [] as revision}
+            {#each results as revision}
               <details class="border border-base-300 rounded">
                 <summary class="cursor-pointer px-3 py-2 text-sm font-medium">{$t('proofread.resultChapter', {chapter:revision.chapter_num, blocks:(revision.changes || []).length})}</summary>
                 <div class="border-t border-base-300 p-3 space-y-3">
@@ -93,6 +136,7 @@
                       </div>
                     </div>
                   {/each}
+                  {#if (pp.proposed||[]).includes(revision)}<button class="btn btn-primary btn-sm" disabled={$taskRunning} on:click={()=>adopt(revision)}>{$t('flow.adoptProof')}</button>{/if}
                 </div>
               </details>
             {/each}
@@ -105,15 +149,35 @@
 
     <div class="proofread-grid grid grid-cols-[345px_minmax(0,1fr)] gap-3 min-h-[520px]">
       <div class="card bg-base-200"><div class="card-body p-3 gap-2 overflow-y-auto max-h-[70vh]">
-        <div class="flex gap-1"><select class="select select-xs flex-1" bind:value={selectedStatus}><option value="all">{$t('proofread.allStatus')}</option><option value="pending">{$t('proofread.pending')}</option><option value="resolved">{$t('proofread.resolved')}</option><option value="ignored">{$t('proofread.ignored')}</option></select><select class="select select-xs flex-1" bind:value={selectedCategory}><option value="all">{$t('proofread.allCategory')}</option>{#each categories as c}<option value={c}>{$t('proofread.category.' + c)}</option>{/each}</select></div>
+        <div class="flex gap-1"><select class="select select-xs flex-1" aria-label={$t('proofread.allStatus')} bind:value={selectedStatus}><option value="all">{$t('proofread.allStatus')}</option><option value="pending">{$t('proofread.pending')}</option><option value="resolved">{$t('proofread.resolved')}</option><option value="ignored">{$t('proofread.ignored')}</option></select><select class="select select-xs flex-1" aria-label={$t('proofread.allCategory')} bind:value={selectedCategory}><option value="all">{$t('proofread.allCategory')}</option>{#each categories as c}<option value={c}>{$t('proofread.category.' + c)}</option>{/each}</select></div>
         {#each filtered as issue}
-          <div class="border border-base-300 rounded p-2 space-y-1"><div class="font-medium text-sm">{issue.title}</div><div class="text-xs opacity-70">{issue.detail}</div><div class="text-xs">{$t('proofread.suggestion')}：{issue.suggestion}</div>
-            <div class="flex flex-wrap gap-1">{#each issue.anchors as a}<button class="btn btn-outline btn-xs" on:click={()=>jump(a)}>{$t('proofread.anchor',{chapter:a.chapter_num,block:a.block_id})}</button>{/each}</div>
-            <div class="tabs tabs-box tabs-xs w-fit"><button class="tab" class:tab-active={issue.status==='resolved'} on:click={()=>setStatus(issue,'resolved')}>{$t('proofread.resolved')}</button><button class="tab" class:tab-active={issue.status==='ignored'} on:click={()=>setStatus(issue,'ignored')}>{$t('proofread.ignored')}</button><button class="tab" class:tab-active={issue.status==='pending'} on:click={()=>setStatus(issue,'pending')}>{$t('proofread.pending')}</button></div>
+          <div class="border border-base-300 rounded overflow-hidden" class:border-primary={activeIssue===issue.id}>
+            <button class="block w-full text-left p-3 hover:bg-base-100" aria-pressed={activeIssue===issue.id}
+              disabled={issueBusy||!!editing||!!insertAfter} on:click={()=>selectIssue(issue)}>
+              <span class="block font-medium">{issue.title}</span>
+              <span class="block text-sm opacity-75">{issue.detail}</span>
+            </button>
+            <div class="flex flex-wrap gap-1 px-3 pb-2">{#each issue.anchors||[] as a}<button class="btn btn-outline btn-xs" disabled={issueBusy||!!editing||!!insertAfter} on:click={()=>selectIssue(issue,a)}>{$t('proofread.anchor',{chapter:a.chapter_num,block:a.block_id})}</button>{/each}</div>
+
           </div>
         {:else}<p class="text-sm opacity-50 text-center py-6">{$t('proofread.noIssues')}</p>{/each}
       </div></div>
       <div class="card bg-base-200"><div class="card-body p-4 overflow-y-auto max-h-[70vh]">
+        <label class="label">{$t('flow.proofCopy')} <select class="select select-sm" value={chapter?.num||''} disabled={issueBusy||!!editing||!!insertAfter} on:change={e=>openChapter(Number(e.target.value))}>
+          <option disabled value="">{$t('flow.chooseChapter')}</option>
+          {#each pp.chapters||[] as item}<option value={item.num}>{item.num} · {item.title}</option>{/each}
+        </select></label>
+        {#if stale}<div class="alert"><span>{$t('flow.writingChanged')}</span><button class="btn btn-sm" disabled={$taskRunning} on:click={()=>syncChapter(chapter.num)}>{$t('flow.sync')}</button></div>{/if}
+        {#if selectedIssue}<section class="candidate-panel space-y-2">
+          <h3 class="font-semibold">{selectedIssue.title}</h3><p>{selectedIssue.suggestion}</p>
+          <textarea class="textarea w-full" bind:value={note} aria-label={$t('flow.decisionNote')} placeholder={$t('flow.decisionNote')}></textarea>
+          <div class="flex gap-2 flex-wrap">
+            <button class="btn btn-sm" disabled={$taskRunning||issueBusy||!highlighted||!!editing||!!insertAfter} on:click={()=>{const b=chapter?.blocks?.find(b=>b.id===highlighted);if(b){editing=b.id;editText=b.text}}}>{$t('flow.fix')}</button>
+            <button class="btn btn-sm" disabled={$taskRunning||issueBusy||!!editing||!!insertAfter} on:click={()=>setStatus(selectedIssue,'resolved')}>{$t('proofread.resolved')}</button>
+            <button class="btn btn-sm" disabled={$taskRunning||issueBusy||!!editing||!!insertAfter} on:click={()=>setStatus(selectedIssue,'ignored')}>{$t('flow.keep')}</button>
+            <button class="btn btn-sm" disabled={$taskRunning||issueBusy||!!editing||!!insertAfter} on:click={()=>setStatus(selectedIssue,'pending')}>{$t('flow.later')}</button>
+          </div>
+        </section>{/if}
         {#if chapter}<div class="flex items-center"><h3 class="font-bold flex-1">{$t('proofread.chapter',{n:chapter.num,title:chapter.title})}</h3>{#if (pp.revisions||[]).some(r=>r.chapter_num===chapter.num)}<button class="btn btn-warning btn-xs" on:click={()=>undo(chapter.num)}>{$t('proofread.undo')}</button>{/if}</div>
           <div class="space-y-3 mt-3">{#each chapter.blocks||[] as b (b.id)}<div id={'proofread-block-'+b.id} class="relative rounded px-2 py-1 -mx-2 cursor-pointer transition-colors hover:bg-base-100/40 {highlighted===b.id ? 'bg-info/20' : selectedBlock===b.id ? 'bg-primary/10' : ''}" role="button" tabindex="0" aria-pressed={selectedBlock===b.id} on:click={() => selectBlock(b.id)} on:keydown={(e) => { if (e.currentTarget === e.target && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectBlock(b.id); } }}>
             {#if editing===b.id}<textarea class="textarea w-full" rows="5" bind:value={editText}></textarea><div class="flex gap-1 justify-end"><button class="btn btn-xs" on:click={()=>editing=0}>{$t('common.cancel')}</button><button class="btn btn-primary btn-xs" on:click={()=>saveBlock(b.id)}>{$t('common.save')}</button></div>

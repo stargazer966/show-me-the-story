@@ -1,10 +1,12 @@
 <script>
+ import ChapterActions from "../components/ChapterActions.svelte";
   import { api } from '../lib/api.js';
-  import { progress, config, streamingContent, streamingChapterIdx, taskRunning, addToast, showConfirm, outlineCharacterSuggestions, outlineCharacterShowSuggestions, settings } from '../lib/stores.js';
+  import { apiConfig, progress, config, streamingContent, streamingChapterIdx, taskRunning, addToast, showConfirm, outlineCharacterSuggestions, outlineCharacterShowSuggestions, settings } from '../lib/stores.js';
   import { t } from '../lib/i18n/index.js';
   import { onMount, tick } from 'svelte';
   import ConfigChangePanel from '../components/ConfigChangePanel.svelte';
 
+  onMount(async()=>{try{apiConfig.set(await api('GET','/api/config/api'))}catch(e){addToast(e.message,'error')}});
   const OUTLINE_FOCUS_KEY = 'showmethestory.outlineFocusChapter';
 
   function isOutlineEditable(status) {
@@ -81,7 +83,7 @@
   let importPreview = null; // [{num,title,word_count,preview}]
   let importStatus = null;  // {active,total,cursor} 断点状态
   let continuationCount = 5;
-  let planningRequirements = "";
+  let planningRequirements = $progress?.chapters?.length ? "" : ($progress?.core_prompt || "");
   let longTermDirection = "";
   let endingIntent = 'serial';
   let endingStyle = 'closed';
@@ -289,6 +291,7 @@
         </p>
       </div>
       <label class="block text-sm" for="batch-synopsis">{$t('outline.batch.synopsis')}</label>
+      {#if $config?.language==='en' && $apiConfig?.max_tokens>0 && continuationCount*(($config?.story?.outline_max||350)*1.5+80)>$apiConfig.max_tokens}<p class="alert alert-warning">{$t('wf.budget')}</p>{/if}
       <textarea id="batch-synopsis" class="textarea w-full h-36" bind:value={planningRequirements} placeholder={$t('outline.batch.placeholder')} disabled={batchBlocked}></textarea>
       <label class="block text-sm" for="batch-direction">{$t('ending.direction')}</label>
       <p class="text-xs text-base-content/70">{$t('ending.directionHelp')}</p>
@@ -493,8 +496,7 @@
                     {/each}
                   </div>
                 {/if}
-                <p class="text-xs text-base-content/65 mt-1 ml-14 line-clamp-2">{ch.outline}</p>
-              </div>
+                </div><details class="mt-1 ml-14"><summary class="cursor-pointer text-sm">{$t('wf.chapterOutline')}</summary><p class="whitespace-pre-wrap mt-1">{ch.outline}</p></details><ChapterActions {ch}/>
             {/if}
           {/each}
             </section>

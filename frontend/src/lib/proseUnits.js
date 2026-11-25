@@ -15,7 +15,7 @@ function isLatinAlnum(code) {
 }
 
 function isTokenGlue(code) {
-  return code === 0x2e || code === 0x2c || code === 0x2d || code === 0x23; // . , - #
+  return code === 0x27 || code === 0x2019 || code === 0x2e || code === 0x2c || code === 0x2d || code === 0x23; // . , - #
 }
 
 function isWhitespace(code) {

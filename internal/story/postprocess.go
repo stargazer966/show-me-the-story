@@ -11,6 +11,10 @@ import (
 )
 
 type PostProcessState struct {
+	Proposed            []ProofreadRevision `json:"proposed,omitempty"`
+	Copy                *Progress           `json:"copy,omitempty"`
+	CopySettings        *ProjectSettings    `json:"copy_settings,omitempty"`
+	Source              map[int]string      `json:"source,omitempty"`
 	SchemaVersion       int                 `json:"schema_version,omitempty"`
 	BackupAcknowledged  bool                `json:"backup_acknowledged,omitempty"`
 	ContentModified     bool                `json:"content_modified,omitempty"`

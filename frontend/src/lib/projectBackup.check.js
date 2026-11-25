@@ -10,7 +10,7 @@ const script = parse(source).instance.content.body.filter(n => n.type !== 'Impor
 const calls = [], toasts = [], downloads = [];
 let fail = true;
 const context = vm.createContext({
-  onMount: () => {}, $t: key => key,
+  onMount: () => {}, orderedProjects: [], $projects: [], $t: key => key,
   addToast: (message, type) => toasts.push(type),
   apiFetch: async (url, opts) => {
     calls.push({ url, opts });
@@ -35,7 +35,7 @@ vm.runInContext('restoreName = "new story"; restoreFiles = ["zip bytes"]; restor
 fail = true;
 await vm.runInContext('restoreProject()', context);
 assert.equal(vm.runInContext('restoreName', context), 'new story');
-assert.equal(toasts.at(-1), 'error');
+assert.equal(vm.runInContext('restoreError', context), 'request failed');
 assert.equal(vm.runInContext('backupBusy', context), false);
 fail = false;
 await vm.runInContext('restoreProject()', context);

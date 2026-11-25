@@ -9,6 +9,7 @@ import (
 	"showmethestory/internal/config"
 	"showmethestory/internal/llm"
 	"showmethestory/internal/sse"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -22,14 +23,15 @@ type ProofreadAnchor struct {
 }
 
 type ProofreadIssue struct {
-	ID         string            `json:"id"`
-	Category   string            `json:"category"`
-	Severity   string            `json:"severity"`
-	Title      string            `json:"title"`
-	Detail     string            `json:"detail"`
-	Suggestion string            `json:"suggestion"`
-	Status     string            `json:"status"`
-	Anchors    []ProofreadAnchor `json:"anchors"`
+	DecisionNote string            `json:"decision_note,omitempty"`
+	ID           string            `json:"id"`
+	Category     string            `json:"category"`
+	Severity     string            `json:"severity"`
+	Title        string            `json:"title"`
+	Detail       string            `json:"detail"`
+	Suggestion   string            `json:"suggestion"`
+	Status       string            `json:"status"`
+	Anchors      []ProofreadAnchor `json:"anchors"`
 }
 
 type ProofreadBlockChange struct {
@@ -78,9 +80,9 @@ func proofreadCall(ctx context.Context, api *config.APIConfig, system, prompt st
 }
 
 func AnalyzeProofread(ctx context.Context, api *config.APIConfig, cfg *config.Config, settings *ProjectSettings, state *Progress, pp *PostProcessState, logger *sse.LogBroadcaster) error {
-	old := map[string]string{}
+	old := map[string]ProofreadIssue{}
 	for _, issue := range pp.Issues {
-		old[issue.ID] = issue.Status
+		old[issue.ID] = issue
 	}
 	var issues []ProofreadIssue
 	settingsText := buildAllSettingsText(cfg, settings, state)
@@ -145,8 +147,9 @@ Blocks:
 			}
 			sort.Slice(issue.Anchors, func(i, j int) bool { return issue.Anchors[i].BlockID < issue.Anchors[j].BlockID })
 			issue.ID = proofreadIssueID(issue)
-			if status := old[issue.ID]; status == "resolved" || status == "ignored" {
-				issue.Status = status
+			if prior := old[issue.ID]; prior.Status == "resolved" || prior.Status == "ignored" {
+				issue.Status = prior.Status
+				issue.DecisionNote = prior.DecisionNote
 			}
 			issues = append(issues, issue)
 		}
@@ -341,5 +344,65 @@ func UndoProofreadChapter(state *Progress, settings *ProjectSettings, pp *PostPr
 	rebuildContentFromBlocks(&state.Chapters[ci])
 	RefreshProofreadAnchors(state, settings, &state.Chapters[ci])
 	pp.Revisions = append(pp.Revisions[:ri], pp.Revisions[ri+1:]...)
+	return nil
+}
+
+// ProposeProofread runs the copyeditor against detached chapters and stores proposed block replacements.
+func ProposeProofread(ctx context.Context, api *config.APIConfig, cfg *config.Config, pp *PostProcessState, skills []Skill, logger *sse.LogBroadcaster) error {
+	style := FormatSkillsContent(ResolveSkills(skills, cfg.SkillConfig, SkillScopeBookExecute, cfg.Language))
+	pp.ApplyErrors = map[int]string{}
+	pp.Proposed = nil
+	source := *pp.Copy
+	source.Chapters = slices.Clone(source.Chapters)
+	for i := range source.Chapters {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		ch := &source.Chapters[i]
+		if ch.Inherited || ch.Content == "" {
+			continue
+		}
+		base := ChapterRevision(*ch)
+		ch.Blocks = slices.Clone(ch.Blocks)
+		logger.StepInfo(i+1, len(source.Chapters), fmt.Sprintf("Chapter %d", ch.Num))
+		changes, err := applyProofreadChapter(ctx, api, cfg, &source, pp.CopySettings, i, pp.AuthorRequirements, style, logger)
+		if err != nil {
+			pp.ApplyErrors[ch.Num] = err.Error()
+			continue
+		}
+		if len(changes) > 0 {
+			pp.Proposed = append(pp.Proposed, ProofreadRevision{ChapterNum: ch.Num, AfterRev: base, Changes: changes})
+		}
+	}
+	pp.ProofreadAppliedAt = time.Now().Format(time.RFC3339)
+	return ctx.Err()
+}
+
+func AdoptProofread(pp *PostProcessState, num int, base string) error {
+	n := slices.IndexFunc(pp.Proposed, func(r ProofreadRevision) bool { return r.ChapterNum == num && r.AfterRev == base })
+	i := FindChapterIdx(pp.Copy, num)
+	if n < 0 || i < 0 {
+		return fmt.Errorf("proofreading proposal unavailable")
+	}
+	ch := &pp.Copy.Chapters[i]
+	if ChapterRevision(*ch) != base {
+		return fmt.Errorf("proofreading copy has changed; proofread again")
+	}
+	rev := pp.Proposed[n]
+	for _, change := range rev.Changes {
+		idx := FindBlockIdx(ch, change.BlockID)
+		if idx < 0 || ch.Blocks[idx].Text != change.Before {
+			return fmt.Errorf("proofreading block has changed")
+		}
+		ch.Blocks[idx].Text = change.After
+	}
+	rebuildContentFromBlocks(ch)
+	RefreshProofreadAnchors(pp.Copy, pp.CopySettings, ch)
+	rev.AfterRev = ChapterRevision(*ch)
+	rev.AppliedAt = time.Now().Format(time.RFC3339)
+	pp.Revisions = slices.DeleteFunc(pp.Revisions, func(r ProofreadRevision) bool { return r.ChapterNum == num })
+	pp.Revisions = append(pp.Revisions, rev)
+	pp.Proposed = slices.Delete(pp.Proposed, n, n+1)
+	pp.ContentModified = true
 	return nil
 }

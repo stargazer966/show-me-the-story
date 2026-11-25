@@ -75,6 +75,8 @@ main.go
 
 ## 核心流程
 
+- 创作台的大纲版本可带有基于逐字节拍证据的设定建议。作者确认后才更新指定设定字段，决定与撤销状态保存于设定变更历史。已确认的大纲建议不参与正文来源失效检查。
+
 ### 异步任务
 
 - AI 端点统一走 `tryStartTask()`，后台执行并 `defer endTask()`；同一时间只允许一个 AI 任务。
@@ -125,9 +127,14 @@ main.go
 - 提示词占位符是 `config.RenderPrompt` 的 `{{.Key}}` 字符串替换，不是 `text/template`。
 - 新增 prompt 字段时同步更新 `PromptsConfig`、中英默认模板和 `ApplyDefaults`；新增注入块或 system prompt 必须同时提供中英文。
 - Skill 包必须包含 schema v1 的 `skill.json` 及其声明的 Markdown 入口（通常为 `SKILL.md`），仅接受安全校验后的 `.md/.txt/.json`；所有 Skill 默认禁用，并按项目语言、`applies_to` 和动作类别过滤。
+- 每个 Skill 的 Markdown/TXT 参考文件按路径顺序整份加入提示词，合计上限为 96 KiB（含文件标题）。模型请求仍受总 token 预算限制。
 - 内置 Skill 位于 `internal/story/embeds/skills/`，修改后需要重新编译。
 
 ## 前端约定
+
+- 网页标题和 HTML 语言属性随界面语言更新，初次载入使用英文标题。语言名称等界面文字通过同一套翻译目录显示。
+
+- 项目首页先显示项目列表，最近打开顺序保存在浏览器。列表进度取自持久化的章节元数据；新建、模板和还原操作使用原生对话框。
 
 - 启动立即尝试恢复服务端当前项目，不等待版本检查；SSE 恢复或任务开始也会触发恢复。任务运行时禁止返回项目列表。
 - 所有请求复用 `api` / `apiFetch`，携带当前 UI 语言并统一解析本地化错误；下载失败不得提示成功。
@@ -173,3 +180,32 @@ graphify explain "<概念>"
 ```
 
 代码修改后运行 `graphify update .`；图谱生成文件变脏不构成跳过理由。
+
+## Workflow edition
+
+- 英文新项目使用详细章纲（200–350 个英文词）并启用 English Word Count Control；旧项目可手动开启。章纲长度与正文字数独立。模板在程序目录 templates/ 下保存可复用配置和勾选的角色、世界观，创建项目时经临时目录发布。
+- 裸文本 Skill 在导入预览时补齐清单，多个候选入口交由作者选定。已带清单的 Skill 仍走原校验与安装流程。
+- 图片只在分析请求中发送给配置的视觉端点。角色外貌和地理设定草稿分别由作者保存。不同视觉端点使用独立凭据。
+- 手动整章删除按章号预览并校验版本，保留其他章的正文与块 ID。涉及的设定、校订和 Markdown 副本使用 v2 回滚日志与章节文件一起提交；v1 普通保存日志继续兼容。
+
+- Story Desk stores author drafts and append-only outline candidates in project progress. Chapter links use stable part identities across renumbering. Adoption updates only the linked outline; model failure must leave the draft, previous versions and prose intact. The preview and generation share the same message builder and action-scoped skills.
+
+- Writing candidate adoption checks both the chapter source and candidate identity. Writing prose deletion preserves chapter numbering, desk links and outlines. Writing revision does not automatically replan subsequent chapter outlines.
+- Final proofreading uses a persistent manuscript and settings copy. Interactive report decisions, copyedits and exports operate on that copy. Proofread proposals verify the source chapter revision on adoption.
+- Workflow history stores project checkpoints after saved mutations and model tasks. Scoped restores retain other stage data and whole-project restore uses the progress rollback transaction. Global model credentials live outside project history.
+
+- Quick creation assigns a unique project name when the author leaves it blank. Story Desk candidates carry a suggested title and target 50–100 English words per beat. Outline adoption returns Writing progress in the same response.
+
+- Story Desk generation adopts the latest outline in the same save while retaining earlier versions. Selective prose generation publishes directly to Writing; chapter revision includes numbered prose blocks and the adopted beats for pacing requests.
+
+- Story Desk preserves chapter remarks and ordered beat remarks on the draft and the version that generated them. Adopted outline versions include editable per-beat prose instructions; Writing uses those instructions for generation, revision and source-version comparison.
+
+- Story Desk keeps chapter selection in a separate list beside the beat editor. Deleting a chapter from Story Desk preserves the indexed draft and outline versions for restoration and preserves linked Writing chapters. Beat cards expand independently and contain their own outline edits and revision controls. On narrow workspaces the chapter list moves above the editor and beat input and output stack. Desktop navigation and chat each have an independent visibility setting.
+
+- Story Settings groups story details, style and POV, and chapter and outline lengths on one page. A shared save writes only the changed project settings or long-term direction using their existing endpoints.
+
+- Skill optimization revises the entry text, carries over reference files and language metadata, and validates the separate copy before installation. The Skills page displays the latest optimization result.
+
+- Each project can override a skill’s prompt scopes, including built-in skills, while the package manifest remains the default for other projects and the basis for library validation. The scope editor describes each operation and identifies reserved scopes as inactive.
+
+- 创作台主操作随章纲状态切换，已采用且来源未变时优先进入同一章的写作页。写作页与写作提示词共用已采用版本的节拍指示，后端进度视图只派生当前版本的指示。校订意见可独立于段落锚点选取和处理。

@@ -10,6 +10,13 @@ import (
 )
 
 type ChapterState struct {
+	// WritingGuidance is derived from the adopted outline for the progress API.
+	WritingGuidance *deskProseGuidance `json:"writing_guidance,omitempty"`
+
+	DeskPart         int    `json:"desk_part,omitempty"`
+	DeskVersion      int    `json:"desk_version,omitempty"`
+	DeskProseVersion int    `json:"desk_prose_version,omitempty"`
+	DeskEarlierProse bool   `json:"desk_earlier_prose,omitempty"`
 	KnowledgeTracked bool   `json:"knowledge_tracked,omitempty"`
 	MemoryRevision   string `json:"memory_revision,omitempty"`
 	Inherited        bool   `json:"inherited,omitempty"`
@@ -105,6 +112,8 @@ type MemoryEntry struct {
 }
 
 type Progress struct {
+	ProseCandidates             map[int]ProseCandidate   `json:"prose_candidates,omitempty"`
+	Desk                        StoryDesk                `json:"story_desk,omitzero"`
 	NextMemoryID                int                      `json:"next_memory_id,omitempty"`
 	OutlineBatches              []OutlineBatch           `json:"outline_batches,omitempty"`
 	Phase                       string                   `json:"phase"`
@@ -182,7 +191,9 @@ func LoadProgress(path string) (*Progress, error) {
 // SaveProgress persists chapter prose to per-chapter files (only chapters
 // whose content changed since load/last save are rewritten), then writes the
 // metadata file without prose content.
-func SaveProgress(path string, p *Progress) error {
+func SaveProgress(path string, p *Progress) error { return saveProgressFiles(path, p, nil) }
+
+func saveProgressFiles(path string, p *Progress, sidecars []progressFile) error {
 	progressStorageMu.Lock()
 	defer progressStorageMu.Unlock()
 	if err := recoverProgress(path, fsutil.WriteFileAtomic); err != nil {
@@ -190,6 +201,9 @@ func SaveProgress(path string, p *Progress) error {
 	}
 	if err := os.MkdirAll(chaptersDir(path), 0755); err != nil {
 		return &fsutil.SaveError{Path: path, Stage: "create_chapters", OriginalPreserved: true, Err: err}
+	}
+	if len(sidecars) > 0 {
+		resetCache(path)
 	}
 	files, err := prepareChapterFiles(path, p)
 	if err != nil {
@@ -209,6 +223,7 @@ func SaveProgress(path string, p *Progress) error {
 	if err != nil {
 		return fmt.Errorf("序列化进度失败: %w", err)
 	}
+	files = append(files, sidecars...)
 	files = append(files, progressFile{Num: 0, Data: data})
 	if err := commitProgressFiles(path, files, fsutil.WriteFileAtomic); err != nil {
 		return fmt.Errorf("保存进度文件失败: %w", err)

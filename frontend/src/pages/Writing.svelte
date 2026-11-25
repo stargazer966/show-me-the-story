@@ -1,4 +1,5 @@
 <script>
+ import ChapterActions from "../components/ChapterActions.svelte";
   import { onMount, tick } from 'svelte';
   import { api, apiFetch } from '../lib/api.js';
   import { config, progress, taskRunning, streamingContent, streamingChapterIdx, selectedChapter, autoConfirm, addToast, confirmModal } from '../lib/stores.js';
@@ -70,6 +71,11 @@
   const OUTLINE_FOCUS_KEY = 'showmethestory.outlineFocusChapter';
 
   onMount(async () => {
+    // Refresh after entering Writing, including when navigation happened during outline adoption.
+    const before = $progress;
+    api('GET', '/api/progress').then(value => {
+      if ($progress === before) progress.set(value);
+    }).catch(() => {});
     try {
       const res = await api('GET', '/api/autoconfirm');
       autoConfirm.set(!!res.enabled);
@@ -93,7 +99,7 @@
   }
 
   $: p = $progress;
-  $: inWriting = p?.phase === 'writing';
+  $: inWriting = p?.phase === 'writing' || chapters.some(c => !c.inherited && !!c.outline?.trim());
   $: chapters = p?.chapters || [];
   $: projectChapters = chapters.filter(c => !c.inherited);
   $: total = projectChapters.length;
@@ -101,19 +107,18 @@
   $: pct = total > 0 ? Math.round(accepted / total * 100) : 0;
   $: currentIdx = p?.current_chapter_index ?? 0;
 
-  // 默认选中当前章节
-  $: if (inWriting && ($selectedChapter < 0 || $selectedChapter >= chapters.length)) {
-    selectedChapter.set(Math.min(currentIdx, chapters.length - 1));
-  }
+  $: chapterIndex = $selectedChapter >= 0 && $selectedChapter < chapters.length
+    ? $selectedChapter
+    : Math.max(0, Math.min(currentIdx, chapters.length - 1));
 
   // 自动确认模式下，自动跟随正在生成的章节
   $: if ($autoConfirm && $streamingChapterIdx >= 0 && $streamingChapterIdx < chapters.length && $streamingChapterIdx !== $selectedChapter) {
     selectedChapter.set($streamingChapterIdx);
   }
 
-  $: ch = $selectedChapter >= 0 && $selectedChapter < chapters.length ? chapters[$selectedChapter] : null;
-  $: isCurrent = ch && currentIdx === $selectedChapter;
-  $: isStreamingThis = $streamingChapterIdx === $selectedChapter && $streamingContent;
+  $: ch = chapters[chapterIndex] || null;
+  $: isCurrent = ch && currentIdx === chapterIndex;
+  $: isStreamingThis = $streamingChapterIdx === chapterIndex && $streamingContent;
 
   // /api/progress 不携带正文，选中章节的正文按需拉取，content_rev 变化时刷新
   let chapterContent = '';
@@ -226,6 +231,9 @@
 
   // 流式期间 $streamingContent 只含尾部窗口（性能保护），全文在生成结束后按需拉取
   $: displayContent = isStreamingThis ? $streamingContent : chapterContent;
+  $: targetWords=(strictCount ? $config?.story?.target_words_per_chapter : $progress?.story_config_snapshot?.target_words_per_chapter) || $config?.story?.target_words_per_chapter || 2500;
+  $: strictCount=$config?.language==='en' && $config?.skill_config?.enabled_skills?.['english-word-count-control'];
+  $: margin=Math.floor(targetWords*($config?.story?.word_tolerance||10)/100);
   $: chapterWordCount = ch?.word_count || (chapterContent ? countProseUnits(chapterContent) : 0);
   $: showTaskTokens = $taskRunning && isCurrent;
   $: totalWords = chapters.reduce((sum, c) => sum + (c.word_count || 0), 0);
@@ -370,24 +378,26 @@
     cancelBlockOps();
   }
 
-  async function doGenerate() {
+  let showFacts = localStorage.getItem('writing-show-facts') !== 'false';
+  let generationBusy = false;
+  async function doGenerate(mode = 'rewrite') {
+    const num = ch.num;
+    generationBusy = true;
     try {
-      await api('POST', '/api/chapter/generate');
-      addToast($t('writing.toasts.generateStarted', { num: ch?.num }), 'info');
-    } catch (e) { addToast(e.message, 'error'); }
+      if(mode==='rewrite' && $autoConfirm && isCurrent && !hasContent && ch.status==='pending'){
+        await api('POST','/api/chapter/generate');
+        return;
+      }
+      progress.set(await api('POST','/api/writing/generate/'+num+'?mode='+mode));
+    } catch(e) { addToast(e.message,'error'); }
+    finally { generationBusy=false; }
   }
-
   async function doConfirm() {
     try {
-      await api('POST', '/api/chapter/confirm');
-      progress.set(await api('GET', '/api/progress'));
-      addToast($t('writing.toasts.confirmed', { num: ch?.num }), 'success');
-      // 跳到下一章
-      const next = await api('GET', '/api/progress');
-      if (next.current_chapter_index < (next.chapters || []).length) {
-        selectedChapter.set(next.current_chapter_index);
-      }
-    } catch (e) { addToast(e.message, 'error'); }
+      const num=ch.num;
+      progress.set(await api('POST','/api/writing/confirm/'+num));
+      addToast($t('writing.toasts.confirmed',{num}),'success');
+    } catch(e) { addToast(e.message,'error'); }
   }
 
   async function doRevise(confirmed = false) {
@@ -457,8 +467,8 @@
     } catch (e) { addToast(e.message, 'error'); }
   }
 
-  function prevChapter() { if ($selectedChapter > 0) selectChapter($selectedChapter - 1); }
-  function nextChapter() { if ($selectedChapter < chapters.length - 1) selectChapter($selectedChapter + 1); }
+  function prevChapter() { if (chapterIndex > 0) selectChapter(chapterIndex - 1); }
+  function nextChapter() { if (chapterIndex < chapters.length - 1) selectChapter(chapterIndex + 1); }
 
   function smoothTransitions() {
     confirmModal.set({
@@ -501,31 +511,6 @@
       <p class="alert alert-info">{$t('ending.completeHint')}</p>
     {/if}
 
-    <!-- 进度 -->
-    <div class="card bg-base-200">
-      <div class="card-body p-4 gap-2">
-        <div class="flex items-center gap-3">
-          <h2 class="card-title text-base flex-1">{$t('writing.progress.title')}</h2>
-          <label class="flex items-center gap-1.5 cursor-pointer" title={$t('writing.progress.autoConfirmTip')}>
-            <input type="checkbox" class="toggle toggle-xs toggle-success" checked={$autoConfirm} on:change={toggleAutoConfirm} />
-            <span class="text-xs text-base-content/60">{$t('writing.progress.autoConfirm')}</span>
-          </label>
-          <span class="text-xs text-base-content/65">{$t('writing.progress.totalWords', { n: totalWords.toLocaleString() })}</span>
-          {#if accepted >= 2}
-            <button class="btn btn-outline btn-xs" on:click={smoothTransitions} disabled={$taskRunning} title={$t('writing.btn.smoothTransitions.tip')}>{$t('writing.btn.smoothTransitions')}</button>
-          {/if}
-          <button class="btn btn-outline btn-xs" on:click={exportBook}>{$t('writing.btn.exportTxt')}</button>
-			{#if p.book_status === 'completed'}
-				<button class="btn btn-warning btn-xs" on:click={() => setBookCompleted(false)} disabled={$taskRunning}>{$t('writing.book.resume')}</button>
-			{:else}
-				<button class="btn btn-success btn-xs" on:click={() => setBookCompleted(true)} disabled={$taskRunning}>{$t('writing.book.complete')}</button>
-			{/if}
-        </div>
-        <progress class="progress progress-primary w-full" value={pct} max="100"></progress>
-        <div class="text-sm text-base-content/65">{$t('writing.progress.acceptedSummary', { pct, accepted, total })}</div>
-      </div>
-    </div>
-
     {#if writingConflict}
       <div class="card bg-error/10 border border-error/30 ">
         <div class="card-body p-4 gap-3">
@@ -563,7 +548,7 @@
           <h3 class="font-semibold text-warning">{$t('writing.orphan.title')}</h3>
           <p class="text-sm text-base-content/70">{$t('writing.orphan.hint')}</p>
           <div class="flex flex-wrap gap-2">
-            <button class="btn btn-primary btn-xs" disabled={$taskRunning} on:click={doGenerate}>{$t('writing.orphan.retry')}</button>
+            <button class="btn btn-primary btn-xs" disabled={$taskRunning} on:click={()=>doGenerate()}>{$t('writing.orphan.retry')}</button>
             <button class="btn btn-outline btn-xs" disabled={$taskRunning} on:click={() => resolveWritingConflict('force_review')}>{$t('writing.orphan.forceReview')}</button>
             <button class="btn btn-warning btn-xs" disabled={$taskRunning} on:click={gotoOutlineForConflict}>{$t('writing.conflict.gotoOutline')}</button>
             <button class="btn btn-warning btn-xs" disabled={$taskRunning} on:click={gotoForeshadows}>{$t('writing.conflict.gotoForeshadows')}</button>
@@ -572,47 +557,14 @@
       </div>
     {/if}
 
-    {#if foreshadows.length > 0}
-      <div class="card bg-base-200">
-        <div class="card-body p-4 gap-2">
-          <div class="flex items-center justify-between gap-2">
-            <h3 class="font-medium text-sm">{$t('writing.fs.title')}</h3>
-            <button class="btn btn-outline btn-xs" on:click={() => window.location.hash = '#foreshadows'}>{$t('writing.fs.goto')}</button>
-          </div>
-          <div class="flex flex-wrap gap-2 text-xs">
-            <span class="badge badge-ghost">{$t('writing.fs.total', { n: foreshadows.length })}</span>
-            <span class="badge badge-info badge-outline">{$t('writing.fs.active', { n: fsActive.length })}</span>
-            {#if fsOverdue.length > 0}
-              <span class="badge badge-error">{$t('writing.fs.overdue', { n: fsOverdue.length })}</span>
-            {/if}
-            {#if fsNearTarget.length > 0}
-              <span class="badge badge-warning badge-outline">{$t('writing.fs.nearTarget', { n: fsNearTarget.length })}</span>
-            {/if}
-          </div>
-          {#if fsOverdue.length > 0}
-            <p class="text-xs text-warning">{$t('writing.fs.overdueDetail', { names: fsOverdue.map(f => `#${f.id} ${f.name}`).join(', ') })}</p>
-          {:else if fsNearTarget.length > 0}
-            <p class="text-xs text-base-content/65">{$t('writing.fs.nearDetail', { names: fsNearTarget.map(f => f.name).join(', ') })}</p>
-          {/if}
-        </div>
-      </div>
-    {:else}
-      <div class="card bg-base-200">
-        <div class="card-body p-4 flex items-center justify-between gap-2">
-          <p class="text-sm text-base-content/65">{$t('writing.fs.none')}</p>
-          <button class="btn btn-outline btn-xs" on:click={() => window.location.hash = '#foreshadows'}>{$t('writing.fs.setup')}</button>
-        </div>
-      </div>
-    {/if}
-
     <!-- 章节区 -->
-    <div class="writing-grid grid grid-cols-[345px_minmax(0,1fr)] gap-3" style="min-height:400px">
+    <div class="writing-grid grid grid-cols-[minmax(10rem,13rem)_minmax(0,1fr)] gap-3" style="min-height:400px">
       <!-- 章节列表 -->
       <div class="card bg-base-200  overflow-y-auto max-h-[calc(100vh-280px)]">
         <ul class="menu menu-sm p-0 w-full">
           {#each chapters as c, i}
             <li>
-              <button class="flex gap-2 items-center {$selectedChapter === i ? 'active' : ''}" on:click={() => selectChapter(i)}>
+              <button class="flex gap-2 items-center {chapterIndex === i ? 'active' : ''}" on:click={() => selectChapter(i)}>
                 <span class="w-2 h-2 rounded-full shrink-0 {statusMeta[c.status]?.dot || ''}"></span>
                 <span class="text-base-content/65 w-6 shrink-0 text-right">{c.num}</span>
                 <span class="flex-1 text-left truncate text-sm">{c.title}</span>
@@ -630,16 +582,46 @@
         {#if ch}
           <div class="card bg-base-200">
             <div class="card-body p-4 gap-2">
+              <div class="flex items-start justify-between gap-3 flex-wrap">
+                <h2 class="card-title chapter-heading">{ch.title===`Chapter ${ch.num}`||ch.title===`第${ch.num}章` ? ch.title : $t('writing.chapter.title', {num:ch.num,title:ch.title})}</h2><ChapterActions {ch}/>
+              </div>
               <div class="flex items-center gap-2 flex-wrap">
-                <h2 class="card-title text-base flex-1 min-w-0">{$t('writing.chapter.title', { num: ch.num, title: ch.title })}</h2>
                 <span class="badge badge-sm {statusMeta[ch.status]?.cls || 'badge-ghost'}">{statusMeta[ch.status]?.label || ch.status}</span>
                 {#if showTaskTokens}
                   <TaskTokenBadge className="text-xs text-base-content/65 font-mono" />
                 {:else if chapterWordCount > 0}
-                  <span class="text-xs text-base-content/65">{$t('writing.chapter.words', { n: chapterWordCount.toLocaleString() })}</span>
+                  <span class="text-xs text-base-content/65">{$t('writing.chapter.words', { n: chapterWordCount.toLocaleString() })} / {targetWords} {#if strictCount}· {$t(chapterWordCount>=targetWords-margin && chapterWordCount<=targetWords+margin?'wf.inRange':'wf.outRange')}{/if}</span>
                 {/if}
               </div>
 
+              {#if !ch.inherited}
+                <div class="flex flex-wrap items-center gap-2">
+                {#if !hasContent}<button class="btn btn-primary btn-sm" disabled={$taskRunning||generationBusy||ch.status==='writing'||!ch.outline?.trim()} on:click={()=>doGenerate()}>{$t('flow.generate')}</button>
+                {#if !ch.outline?.trim()}<small>{$t('flow.needOutline')}</small>{/if}
+                {:else if ch.desk_earlier_prose}
+                  <button class="btn btn-primary btn-sm" disabled={$taskRunning||generationBusy} on:click={()=>doGenerate('update')}>{$t('flow.updateProse')}</button><small>{$t('flow.outlineChanged')}</small>
+                {:else}
+                  <button class="btn btn-outline btn-sm" disabled={$taskRunning||generationBusy||ch.status==='writing'||!ch.outline?.trim()} on:click={()=>doGenerate()}>{$t('flow.rewriteProse')}</button>
+                {/if}
+                <label class="label text-sm"><input type="checkbox" class="checkbox checkbox-sm" bind:checked={showFacts} on:change={e=>localStorage.setItem('writing-show-facts',String(e.target.checked))}/> {$t('flow.factLabels')}</label>
+                </div>
+              {/if}
+              {#if generationBusy}<p role="status">{$t('desk.working')}</p>{/if}
+              {#if ch.writing_guidance}
+                <details class="bg-base-300 rounded px-3 py-2">
+                  <summary class="cursor-pointer font-medium">{$t('desk.instructions')} · {$t('desk.version')} {ch.desk_version}</summary>
+                  {#if ch.writing_guidance.chapter_remarks}<p class="mt-2 whitespace-pre-wrap break-words">{ch.writing_guidance.chapter_remarks}</p>{/if}
+                  {#each ch.writing_guidance.beats as beat}
+                    {#if beat.writing_instruction||beat.author_remark}
+                      <div class="mt-2 border-t border-base-content/15 pt-2">
+                        <strong>{$t('desk.beat')} {beat.beat}</strong>
+                        {#if beat.writing_instruction}<p class="whitespace-pre-wrap break-words">{beat.writing_instruction}</p>{/if}
+                        {#if beat.author_remark}<p class="whitespace-pre-wrap break-words text-sm"><strong>{$t('desk.authorRemark')}</strong> {beat.author_remark}</p>{/if}
+                      </div>
+                    {/if}
+                  {/each}
+                </details>
+              {/if}
               <KnowledgePanel chapterNum={ch.num} bind:facts bind:activeFact bind:expanded={knowledgeExpanded} on:jump={e => jumpToFact(e.detail)} />
               {#if returnRef}<button class="btn btn-outline btn-xs self-start" on:click={() => jumpToFact(returnRef, true)}>{$t('facts.return')}</button>{/if}
 
@@ -673,9 +655,10 @@
                     <span class="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5 align-text-bottom"></span>
                   {:else if chapterBlocks.length > 0}
                     <div class="space-y-3">
-                      {#each chapterBlocks as b (b.id)}
+                      {#each chapterBlocks as b, blockIndex (b.id)}
                         <div id={'story-block-' + b.id} class="relative rounded -mx-2 px-2 py-1 cursor-pointer transition-colors hover:bg-base-100/40 {highlightedBlock === b.id || activeFact?.references?.some(r => !r.stale && r.chapter === ch.num && r.block_id === b.id) ? 'bg-info/20' : selectedBlockId === b.id ? 'bg-primary/10' : ''}" role="button" tabindex="0" aria-pressed={selectedBlockId===b.id} on:click={() => selectBlock(b.id)} on:keydown={(e) => { if (e.currentTarget === e.target && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectBlock(b.id); } }}>
-                          {#if blockFacts(b.id).length}<div class="flex flex-wrap gap-1 mb-2">{#each blockFacts(b.id) as fact}<button class="badge badge-warning badge-sm cursor-pointer" on:click|stopPropagation={() => { activeFact = fact; highlightedBlock = b.id; knowledgeExpanded = true; }}>{$t('facts.marker')} #{fact.id}</button>{/each}</div>{/if}
+                          {#if showRevise}<small class="block text-base-content/65">{$t('flow.revisionBlock',{n:blockIndex+1,words:countProseUnits(b.text)})}</small>{/if}
+                          {#if showFacts && blockFacts(b.id).length}<div class="flex flex-wrap gap-1 mb-2">{#each blockFacts(b.id) as fact}<button class="badge badge-warning badge-sm cursor-pointer" on:click|stopPropagation={() => { activeFact = fact; highlightedBlock = b.id; knowledgeExpanded = true; }}>{$t('facts.marker')} #{fact.id}</button>{/each}</div>{/if}
                           {#if editingBlockId === b.id}
                             <textarea class="textarea textarea-sm w-full text-[15px] leading-relaxed" rows={Math.max(3, Math.ceil(b.text.length / 40))} bind:value={editingText} disabled={$taskRunning}></textarea>
                             <div class="flex gap-2 justify-end mt-1">
@@ -732,10 +715,7 @@
 
               <!-- 操作 -->
               <div class="flex gap-2 flex-wrap items-center mt-1">
-                {#if ch.status === 'pending' && isCurrent}
-                  <button class="btn btn-primary btn-sm" on:click={doGenerate} disabled={$taskRunning}>{$t('writing.btn.generate')}</button>
-                {/if}
-                {#if ch.status === 'review' && isCurrent}
+                {#if ch.status === 'review' && !ch.inherited}
                   <button class="btn btn-success btn-sm" on:click={doConfirm} disabled={$taskRunning}>{$t('writing.btn.confirm')}</button>
                 {/if}
                 {#if hasContent && ch.status !== 'writing'}
@@ -748,8 +728,8 @@
                 {/if}
                 <div class="flex-1"></div>
                 <div class="join">
-                  <button class="btn btn-ghost btn-xs join-item" on:click={prevChapter} disabled={$selectedChapter <= 0}>{$t('writing.btn.prev')}</button>
-                  <button class="btn btn-ghost btn-xs join-item" on:click={nextChapter} disabled={$selectedChapter >= chapters.length - 1}>{$t('writing.btn.next')}</button>
+                  <button class="btn btn-ghost btn-xs join-item" on:click={prevChapter} disabled={chapterIndex <= 0}>{$t('writing.btn.prev')}</button>
+                  <button class="btn btn-ghost btn-xs join-item" on:click={nextChapter} disabled={chapterIndex >= chapters.length - 1}>{$t('writing.btn.next')}</button>
                 </div>
               </div>
 
@@ -775,6 +755,7 @@
                         </div>
                       </fieldset>
                     {/if}
+                  <p class="text-sm text-base-content/75">{$t('flow.pacingHint')}</p>
                   <textarea
                     class="textarea textarea-sm w-full h-20 text-sm"
                     bind:value={reviseFeedback}
@@ -805,5 +786,66 @@
         {/if}
       </div>
     </div>
+    <details class="card bg-base-200">
+      <summary class="cursor-pointer px-4 py-3 font-medium">{$t('writing.tools')}</summary>
+    <!-- 进度 -->
+    <div class="card bg-base-200">
+      <div class="card-body p-4 gap-2">
+        <div class="flex items-center gap-3">
+          <h2 class="card-title text-base flex-1">{$t('writing.progress.title')}</h2>
+          <label class="flex items-center gap-1.5 cursor-pointer" title={$t('writing.progress.autoConfirmTip')}>
+            <input type="checkbox" class="toggle toggle-xs toggle-success" checked={$autoConfirm} on:change={toggleAutoConfirm} />
+            <span class="text-xs text-base-content/60">{$t('writing.progress.autoConfirm')}</span>
+          </label>
+          <span class="text-xs text-base-content/65">{$t('writing.progress.totalWords', { n: totalWords.toLocaleString() })}</span>
+          {#if accepted >= 2}
+            <button class="btn btn-outline btn-xs" on:click={smoothTransitions} disabled={$taskRunning} title={$t('writing.btn.smoothTransitions.tip')}>{$t('writing.btn.smoothTransitions')}</button>
+          {/if}
+          <button class="btn btn-outline btn-xs" on:click={exportBook}>{$t('writing.btn.exportTxt')}</button>
+			{#if p.book_status === 'completed'}
+				<button class="btn btn-warning btn-xs" on:click={() => setBookCompleted(false)} disabled={$taskRunning}>{$t('writing.book.resume')}</button>
+			{:else}
+				<button class="btn btn-success btn-xs" on:click={() => setBookCompleted(true)} disabled={$taskRunning}>{$t('writing.book.complete')}</button>
+			{/if}
+        </div>
+        <progress class="progress progress-primary w-full" value={pct} max="100"></progress>
+        <div class="text-sm text-base-content/65">{$t('writing.progress.acceptedSummary', { pct, accepted, total })}</div>
+      </div>
+    </div>
+
+    {#if foreshadows.length > 0}
+      <div class="card bg-base-200">
+        <div class="card-body p-4 gap-2">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="font-medium text-sm">{$t('writing.fs.title')}</h3>
+            <button class="btn btn-outline btn-xs" on:click={() => window.location.hash = '#foreshadows'}>{$t('writing.fs.goto')}</button>
+          </div>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="badge badge-ghost">{$t('writing.fs.total', { n: foreshadows.length })}</span>
+            <span class="badge badge-info badge-outline">{$t('writing.fs.active', { n: fsActive.length })}</span>
+            {#if fsOverdue.length > 0}
+              <span class="badge badge-error">{$t('writing.fs.overdue', { n: fsOverdue.length })}</span>
+            {/if}
+            {#if fsNearTarget.length > 0}
+              <span class="badge badge-warning badge-outline">{$t('writing.fs.nearTarget', { n: fsNearTarget.length })}</span>
+            {/if}
+          </div>
+          {#if fsOverdue.length > 0}
+            <p class="text-xs text-warning">{$t('writing.fs.overdueDetail', { names: fsOverdue.map(f => `#${f.id} ${f.name}`).join(', ') })}</p>
+          {:else if fsNearTarget.length > 0}
+            <p class="text-xs text-base-content/65">{$t('writing.fs.nearDetail', { names: fsNearTarget.map(f => f.name).join(', ') })}</p>
+          {/if}
+        </div>
+      </div>
+    {:else}
+      <div class="card bg-base-200">
+        <div class="card-body p-4 flex items-center justify-between gap-2">
+          <p class="text-sm text-base-content/65">{$t('writing.fs.none')}</p>
+          <button class="btn btn-outline btn-xs" on:click={() => window.location.hash = '#foreshadows'}>{$t('writing.fs.setup')}</button>
+        </div>
+      </div>
+    {/if}
+
+    </details>
   </div>
 {/if}

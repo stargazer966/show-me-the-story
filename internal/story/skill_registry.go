@@ -22,6 +22,9 @@ const (
 	maxSkillTotalSize = 10 << 20
 )
 
+const maxSkillIDLength = 64
+const maxSkillReferenceBytes = 96 << 10
+
 var skillIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 type SkillManifest struct {
@@ -46,19 +49,34 @@ type SkillRegistryState struct {
 
 func SkillLibraryDir(progDir string) string { return filepath.Join(progDir, "skills") }
 
-func safeSkillRelativePath(name string) (string, error) {
+func cleanSkillRelativePath(name string) (string, error) {
 	name = strings.ReplaceAll(name, `\`, "/")
 	name = strings.TrimPrefix(name, "./")
 	clean := filepath.ToSlash(filepath.Clean(name))
-	if name == "" || clean == "." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") || filepath.IsAbs(name) || strings.Contains(clean, ":") {
+	if name == "" || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") || filepath.IsAbs(name) || strings.Contains(clean, ":") {
 		return "", fmt.Errorf("unsafe skill path %q", name)
 	}
 	parts := strings.Split(clean, "/")
 	if len(parts) > 8 {
 		return "", fmt.Errorf("skill path is too deep: %s", clean)
 	}
-	allowed := map[string]bool{".md": true, ".txt": true, ".json": true}
-	if !allowed[strings.ToLower(filepath.Ext(clean))] {
+	return clean, nil
+}
+
+func skillDocument(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".txt", ".json":
+		return true
+	}
+	return false
+}
+
+func safeSkillRelativePath(name string) (string, error) {
+	clean, err := cleanSkillRelativePath(name)
+	if err != nil {
+		return "", err
+	}
+	if !skillDocument(clean) {
 		return "", fmt.Errorf("unsupported skill file: %s", clean)
 	}
 	return clean, nil
@@ -84,9 +102,12 @@ func FilesFromSkillZip(data []byte) (map[string][]byte, error) {
 		if len(files) >= maxSkillFiles {
 			return nil, fmt.Errorf("skill contains too many files")
 		}
-		name, err := safeSkillRelativePath(f.Name)
+		name, err := cleanSkillRelativePath(f.Name)
 		if err != nil {
 			return nil, err
+		}
+		if !skillDocument(name) {
+			continue
 		}
 		if f.UncompressedSize64 > maxSkillFileSize {
 			return nil, fmt.Errorf("skill file is too large: %s", name)
@@ -350,7 +371,7 @@ func loadSkillPackage(dir, id string, rec SkillRegistryRecord) (Skill, error) {
 				if ext := strings.ToLower(filepath.Ext(rel)); ext == ".md" || ext == ".txt" {
 					if b, readErr := os.ReadFile(path); readErr == nil {
 						chunk := "\n\n## " + rel + "\n\n" + string(b)
-						if len(s.ReferenceContent)+len(chunk) <= 64<<10 {
+						if len(s.ReferenceContent)+len(chunk) <= maxSkillReferenceBytes {
 							s.ReferenceContent += chunk
 						}
 					}
@@ -410,11 +431,131 @@ func DeleteGlobalSkill(progDir, id string) error {
 }
 
 func NextOptimizedSkillID(progDir, base string) string {
-	candidate := base + "-optimized"
-	for n := 2; ; n++ {
-		if _, err := os.Stat(filepath.Join(SkillLibraryDir(progDir), candidate)); os.IsNotExist(err) {
+	for n := 1; ; n++ {
+		suffix := "-optimized"
+		if n > 1 {
+			suffix = fmt.Sprintf("-optimized-%d", n)
+		}
+		candidate := base[:min(len(base), maxSkillIDLength-len(suffix))] + suffix
+		if _, err := os.Stat(filepath.Join(SkillLibraryDir(progDir), candidate)); err != nil {
 			return candidate
 		}
-		candidate = fmt.Sprintf("%s-optimized-%d", base, n)
 	}
+}
+
+// OptimizedSkillFiles keeps the original package layout and reference documents.
+func OptimizedSkillFiles(progDir string, source Skill, manifest SkillManifest, content string) (map[string][]byte, error) {
+	if !skillIDPattern.MatchString(source.ID) {
+		return nil, fmt.Errorf("invalid source skill id")
+	}
+	dir := filepath.Join(SkillLibraryDir(progDir), source.ID)
+	files := make(map[string][]byte, len(source.Resources)+2)
+	for _, name := range source.Resources {
+		rel, err := safeSkillRelativePath(name)
+		if err != nil {
+			return nil, err
+		}
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		info, err := os.Lstat(path)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() || info.Size() > maxSkillFileSize {
+			return nil, fmt.Errorf("invalid skill resource %q", name)
+		}
+		files[rel], err = os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files[manifest.EntryPoint] = []byte(content)
+	files["skill.json"], _ = json.MarshalIndent(manifest, "", "  ")
+	return files, nil
+}
+
+// PrepareSkillImport adds the registry metadata for loose writing instructions.
+// Packaged skills continue through the original manifest validator unchanged.
+func PrepareSkillImport(files map[string][]byte, entry, name string, scopes []string) (map[string][]byte, []string, error) {
+	documents := make(map[string][]byte, len(files))
+	for name, body := range files {
+		path, err := cleanSkillRelativePath(name)
+		if err != nil {
+			return nil, nil, err
+		}
+		if skillDocument(path) {
+			if _, exists := documents[path]; exists {
+				return nil, nil, fmt.Errorf("duplicate skill file: %s", path)
+			}
+			documents[path] = body
+		}
+	}
+	files = normalizeSkillRoot(documents)
+	if _, ok := files["skill.json"]; ok {
+		return files, nil, nil
+	}
+	var entries []string
+	for path := range files {
+		if _, err := safeSkillRelativePath(path); err != nil {
+			return nil, nil, err
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".txt", ".md":
+			entries = append(entries, path)
+		}
+	}
+	sort.Strings(entries)
+	if entry == "" {
+		if len(entries) == 1 {
+			entry = entries[0]
+		} else {
+			for _, p := range entries {
+				if strings.EqualFold(filepath.Base(p), "SKILL.md") {
+					if entry != "" {
+						entry = ""
+						break
+					}
+					entry = p
+				}
+			}
+		}
+	}
+	if entry == "" && len(entries) > 1 {
+		return nil, entries, nil
+	}
+	body, ok := files[entry]
+	if !ok || strings.TrimSpace(string(body)) == "" {
+		return nil, nil, fmt.Errorf("select a non-empty Markdown or text entry")
+	}
+	if !strings.EqualFold(filepath.Ext(entry), ".md") && !strings.EqualFold(filepath.Ext(entry), ".txt") {
+		return nil, nil, fmt.Errorf("invalid entry")
+	}
+	parsed, _ := parseSkillFile(string(body), "user")
+	if name == "" {
+		name = parsed.Name
+	}
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(entry), filepath.Ext(entry))
+		if strings.EqualFold(name, "skill") {
+			name = strings.TrimSpace(strings.TrimLeft(strings.SplitN(strings.TrimSpace(string(body)), "\n", 2)[0], "# "))
+			name = truncateRunes(name, 64)
+		}
+	}
+	if len(scopes) == 0 {
+		scopes = parsed.AppliesTo
+	}
+	if len(scopes) == 0 {
+		scopes = []string{SkillScopeChapterGenerate, SkillScopeChapterRevise}
+	}
+	digest := sha256.Sum256([]byte(name))
+	id := fmt.Sprintf("user-%x", digest[:8])
+	if skillIDPattern.MatchString(parsed.ID) {
+		id = parsed.ID
+	}
+	manifest := SkillManifest{SchemaVersion: 1, ID: id, Name: name, Description: parsed.Description, Category: "writing", Languages: parsed.Languages, EntryPoint: entry, AppliesTo: scopes}
+	b, err := json.Marshal(manifest)
+	if err != nil {
+		return nil, nil, err
+	}
+	files["skill.json"] = b
+	return files, nil, nil
 }

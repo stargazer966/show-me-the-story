@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"showmethestory/internal/config"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,26 @@ func TestInstallSkillAndInvalidateValidationOnContentChange(t *testing.T) {
 	}
 	if second.ContentHash == first.ContentHash || second.Validation != nil {
 		t.Fatalf("changed content must invalidate validation: %+v", second)
+	}
+}
+
+func TestSkillReferenceBudget(t *testing.T) {
+	files := testSkillFiles("Follow the chapter outline.")
+	files["references/a.md"] = bytes.Repeat([]byte("a"), 41<<10)
+	files["references/b.md"] = bytes.Repeat([]byte("b"), 39<<10)
+	files["references/c.md"] = bytes.Repeat([]byte("c"), 17<<10)
+	skill, err := InstallSkillFiles(t.TempDir(), files, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := FormatSkillsContent([]Skill{skill})
+	for _, ref := range []string{"references/a.md", "references/b.md"} {
+		if !strings.Contains(prompt, ref) {
+			t.Errorf("missing reference %s in prompt", ref)
+		}
+	}
+	if strings.Contains(prompt, "references/c.md") || len(skill.Resources) != 3 {
+		t.Fatal("expected the over-budget reference to stay installed and be omitted from the prompt")
 	}
 }
 
@@ -94,5 +115,30 @@ func TestInstallStandardPackageAndResources(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(SkillLibraryDir(dir), "standard", "SKILL.md")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLooseSkillImport(t *testing.T) {
+	bare := map[string][]byte{"my advice.txt": []byte("Make choices consequential.")}
+	files, _, err := PrepareSkillImport(bare, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, err := InstallSkillFiles(t.TempDir(), files, false)
+	if err != nil || skill.Name != "my advice" || skill.Content != "Make choices consequential." {
+		t.Fatal(skill, err)
+	}
+	multi := map[string][]byte{"folder/main.md": []byte("Write."), "folder/details.txt": []byte("Add a turn.")}
+	_, entries, err := PrepareSkillImport(multi, "", "", nil)
+	if err != nil || len(entries) != 2 {
+		t.Fatal(entries, err)
+	}
+	files, _, err = PrepareSkillImport(multi, "main.md", "Beat plan", []string{SkillScopeOutlineGenerate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, err = InstallSkillFiles(t.TempDir(), files, false)
+	if err != nil || len(skill.Resources) != 1 || skill.AppliesTo[0] != SkillScopeOutlineGenerate {
+		t.Fatal(skill, err)
 	}
 }

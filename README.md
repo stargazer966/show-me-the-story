@@ -18,6 +18,16 @@ You decide the story’s rules and direction. Those rules may be realistic or en
 
 ![Batch outline planning](docs/screenshots/en/outline.webp)
 
+## English writing workflow
+
+New English stories enable **English Word Count Control** with a 10% tolerance. Set the chapter target and outline range in Configuration. The detailed preset asks for 200–350 English words and 4–6 connected beats per chapter. A draft that misses its target after bounded retries stays available for review.
+
+From Projects, use **Save as template** on a source project and choose whether to include characters and world entries. Choose the template when starting a fresh story. It carries writing preferences and enabled Skill IDs. Templates and user Skills live beside the application data and can be reused by projects on the same installation.
+
+Skills accepts pasted instructions, Markdown, plain text, folders and text ZIPs. Preview the entry file and scopes, then install and enable the Skill. Existing manifest packages retain their metadata. In Configuration, **Create character and setting from image** analyzes a JPEG, PNG or WebP up to 8 MiB. For a four-panel sheet choose the background panel. Edit and save the two drafts independently. Set a separate vision endpoint, model and key under API settings if your writing model is text-only.
+
+Use **Delete entire chapter** in Outline or Writing to remove a chapter and renumber subsequent chapters. Review the impact before confirming. **Clear prose, keep outline** reopens the latest written chapter for rewriting.
+
 ## First run
 
 1. Download a release for your system, extract it into a directory you intend to keep, and launch it.
@@ -124,3 +134,15 @@ See [AGENTS.md](AGENTS.md) for architecture and contribution constraints, and th
 ## License
 
 [MIT](LICENSE)
+
+### Story Desk
+Open Story Desk, add one part per chapter, enter one beat per line and save the draft. Preview the model request or roll an outline candidate. Adopt a version to send it to Writing. Revision comments can target a chapter or a single beat. Batch planning remains available in its own tab.
+
+### Versioned workflow
+Writing can generate and compare a prose candidate for a selected chapter. Deleting prose leaves its outline available. History records saved project changes and can restore a draft, outline, chapter prose, settings, proofreading work, or the whole project. Final proofreading creates its own manuscript copy. Report decisions and approved copyedits stay in that copy, which can be exported separately.
+
+New projects can be opened with one click after choosing Blank story or a template. Project name and premise are optional. Image analysis suggests an editable fictional character name. Story Desk suggests a chapter title and targets 50–100 English words per beat.
+
+Story Desk adopts each newly generated outline automatically. Select an earlier version to switch back. Writing publishes generated prose directly and keeps earlier versions in History. For pacing edits, Revise chapter shows prose block numbers and word counts. Refer to Story Desk beat numbers when asking to shift the chapter's emphasis.
+
+Each Story Desk beat has a draft and optional remarks alongside its generated outline and editable writing instructions. Writing reads the instructions from the adopted version, including local pacing, voice, and viewpoint. Use **Hide assistant** in the top bar to widen the workspace.

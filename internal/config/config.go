@@ -9,6 +9,9 @@ import (
 )
 
 type APIConfig struct {
+	VisionURL           string `json:"vision_url,omitempty"`
+	VisionModel         string `json:"vision_model,omitempty"`
+	VisionKey           string `json:"vision_key,omitempty"`
 	APIKey              string `json:"api_key"`
 	BaseURL             string `json:"base_url"`
 	URLStrict           bool   `json:"url_strict,omitempty"` // true = 不自动插入 /v1，仅补 /chat/completions
@@ -30,6 +33,9 @@ type Config struct {
 type StoryConfig struct {
 	Type                  string `json:"type"`
 	Title                 string `json:"title"`
+	OutlineMin            int    `json:"outline_min,omitempty"`
+	OutlineMax            int    `json:"outline_max,omitempty"`
+	Tolerance             int    `json:"word_tolerance,omitempty"`
 	TargetWordsPerChapter int    `json:"target_words_per_chapter"`
 	WritingStyle          string `json:"writing_style"`
 	WritingPOV            string `json:"writing_pov"` // 叙述视角，如第一人称女主、第三人称限知等
@@ -96,6 +102,11 @@ func DefaultConfigForLang(lang string) *Config {
 		SkillConfig: &SkillConfig{
 			EnabledSkills: make(map[string]bool),
 		},
+	}
+	if lang == "en" {
+		cfg.Story.OutlineMin = 200
+		cfg.Story.OutlineMax = 350
+		cfg.Story.Tolerance = 10
 	}
 	cfg.Prompts.ApplyDefaults(lang)
 	return cfg
@@ -180,7 +191,8 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 type SkillConfig struct {
-	EnabledSkills map[string]bool `json:"enabled_skills"`
+	EnabledSkills  map[string]bool     `json:"enabled_skills"`
+	ScopeOverrides map[string][]string `json:"scope_overrides,omitempty"`
 }
 
 func (sc *SkillConfig) ApplyDefaults() {

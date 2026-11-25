@@ -55,6 +55,7 @@ type Handlers struct {
 	knowledgeAtStart   string
 	forceKnowledgeSync bool
 	skipKnowledgeSync  bool
+	workflowAction     string
 	autoConfirm        bool // 自动确认模式：章节生成完成后自动确认并继续生成下一章
 
 	lastChatMessage   string             // 缓存最后发送的聊天消息，用于重试
@@ -229,6 +230,9 @@ func (h *Handlers) endTask() {
 			h.broadcastProgress()
 		}
 		h.taskMu.Lock()
+		if err := h.checkpointWorkflow(h.workflowAction); err != nil {
+			h.logger.WarnKey("log.knowledge_failed", err)
+		}
 		h.activeWork = 0
 		h.taskRunning = false
 		if h.taskCancel != nil {
@@ -426,6 +430,10 @@ func (h *Handlers) PutConfig(w http.ResponseWriter, r *http.Request) {
 
 	if newCfg.Story.TargetWordsPerChapter <= 0 {
 		newCfg.Story.TargetWordsPerChapter = 2500
+	}
+	if newCfg.Story.Tolerance < 0 || newCfg.Story.Tolerance > 100 || newCfg.Story.OutlineMin < 0 || newCfg.Story.OutlineMax < 0 || newCfg.Story.OutlineMax > 0 && newCfg.Story.OutlineMax < newCfg.Story.OutlineMin {
+		h.writeErrorReq(w, r, 400, "invalid_request", "Check outline bounds and word count tolerance")
+		return
 	}
 	newCfg.Language = i18n.NormalizeLanguage(newCfg.Language)
 	if newCfg.Language == "" {
@@ -758,12 +766,19 @@ func (h *Handlers) DeleteProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := story.ResetProgressFiles(h.progressPath); err != nil {
+	fresh := &story.Progress{Phase: "outline", Desk: h.state.Desk}
+	var err error
+	if len(fresh.Desk.Parts) > 0 {
+		err = story.SaveProgress(h.progressPath, fresh)
+	} else {
+		err = story.ResetProgressFiles(h.progressPath)
+	}
+	if err != nil {
 		h.writeErrorReq(w, r, http.StatusInternalServerError, "delete_progress_failed", err.Error())
 		return
 	}
 
-	h.state = &story.Progress{Phase: "outline"}
+	h.state = fresh
 	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
 }
 
@@ -871,11 +886,15 @@ func (h *Handlers) PostOutlineCharactersConfirm(w http.ResponseWriter, r *http.R
 			}
 			notes += role
 		}
+		firstAppearance := fmt.Sprintf("First appearance: Chapter %d", item.ChapterNum)
+		if h.cfg.Language == i18n.LangZH {
+			firstAppearance = fmt.Sprintf("首次登场：第%d章", item.ChapterNum)
+		}
 		h.settings.Characters = append(h.settings.Characters, story.Character{
 			ID:         h.settings.NextCharacterID(),
 			Name:       name,
 			Background: notes,
-			Notes:      fmt.Sprintf("首次登场：第%d章", item.ChapterNum),
+			Notes:      firstAppearance,
 		})
 		existing[name] = true
 	}
@@ -888,7 +907,10 @@ func (h *Handlers) PostOutlineCharactersConfirm(w http.ResponseWriter, r *http.R
 	if h.state.LastOutlineCharacterReport != nil {
 		h.state.LastOutlineCharacterReport.HasSuggestions = false
 		h.state.LastOutlineCharacterReport.Suggestions = nil
-		h.state.LastOutlineCharacterReport.Summary = "已采纳建议并登记角色"
+		h.state.LastOutlineCharacterReport.Summary = "Character suggestions accepted"
+		if h.cfg.Language == i18n.LangZH {
+			h.state.LastOutlineCharacterReport.Summary = "已采纳建议并登记角色"
+		}
 		_ = story.SaveProgress(h.progressPath, h.state)
 	}
 
@@ -938,7 +960,7 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 			h.broadcastProgress()
 
 			// 自动确认模式：自动确认本章并继续生成下一章；关闭开关后在本章结束时停止
-			if !h.isAutoConfirmOn() {
+			if !h.isAutoConfirmOn() || story.ChapterNeedsLengthReview(h.cfg, h.state.Chapters[chIdx]) {
 				break
 			}
 			if err := story.ConfirmChapterAction(h.state, h.progressPath); err != nil {
@@ -1317,7 +1339,7 @@ func (h *Handlers) DeleteOutline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, ch := range h.state.Chapters {
-		if ch.Status == story.StatusWriting || ch.Status == story.StatusReview {
+		if ch.Content != "" || ch.Status == story.StatusWriting || ch.Status == story.StatusReview {
 			h.writeErrorReq(w, r, http.StatusConflict, "writing_chapter_present_delete")
 			return
 		}

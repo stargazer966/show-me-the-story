@@ -138,6 +138,9 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 	if ch.Status == StatusAccepted {
 		return fmt.Errorf("第 %d 章已确认，请确认当前章节或重置进度", ch.Num)
 	}
+	if ch.DeskPart > 0 && strings.TrimSpace(ch.Outline) == "" {
+		return fmt.Errorf("%s", i18n.T(cfg.Language, "writing_outline_required"))
+	}
 
 	ch.Status = StatusWriting
 	if err := SaveProgress(progressPath, state); err != nil {
@@ -145,23 +148,6 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 	}
 
 	logger.InfoKey("log.chapter_start", ch.Num, ch.Title)
-
-	// 写前检查：本章大纲若已与实际写出的剧情冲突（如大纲安排初遇但前文已认识），
-	// 先最小化修订大纲再动笔，避免按过时大纲写出矛盾内容。
-	if i > 0 {
-		logger.StepInfo(1, 6, "正在检查本章大纲与当前剧情的一致性...")
-		revised, err := checkOutlineConsistency(ctx, apiCfg, cfg, state, i, logger)
-		if err != nil {
-			logger.WarnKey("log.outline_check_failed", err)
-		} else if revised {
-			if err := SaveProgress(progressPath, state); err != nil {
-				return err
-			}
-			logger.InfoKey("log.outline_auto_revised")
-		} else {
-			logger.InfoKey("log.outline_consistent")
-		}
-	}
 
 	if len(state.Foreshadows) > 0 {
 		RunForeshadowOutlineCheckAndSave(ctx, apiCfg, cfg, state, progressPath, logger)
@@ -192,6 +178,8 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 		if content == "" {
 			return fmt.Errorf("正文生成失败或被取消")
 		}
+		ch.DeskProseVersion = ch.DeskVersion
+		ch.DeskEarlierProse = false
 		ch.Content = content
 		logger.InfoKey("log.prose_done", prose.CountProseUnits(content))
 
@@ -388,27 +376,18 @@ func ReviseChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *con
 	if err != nil {
 		return fmt.Errorf("修改章节失败: %w", err)
 	}
-	ch.Content = revisedContent
 	logger.InfoKey("log.prose_revised", prose.CountProseUnits(revisedContent))
 
 	logger.StepInfo(2, 3, "重新提炼摘要...")
-	summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, ch.Content, logger)
+	summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, revisedContent, logger)
 	if summary == "" {
 		return fmt.Errorf("摘要提炼失败或被取消")
 	}
+	ch.Content = revisedContent
 	ch.Summary = summary
 	logger.InfoKey("log.summary_done")
 
 	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
-
-	if chapterIdx+1 < len(state.Chapters) {
-		logger.StepInfo(3, 3, "正在修订后续章节大纲...")
-		if err := reviseSubsequentOutlines(ctx, apiCfg, cfg, state, chapterIdx, feedback); err != nil {
-			logger.WarnKey("log.subsequent_outline_failed", err)
-		} else {
-			logger.InfoKey("log.subsequent_outline_done")
-		}
-	}
 
 	ch.Status = StatusReview
 	if err := SaveProgress(progressPath, state); err != nil {
@@ -464,14 +443,14 @@ func ReviseSpecificChapterAction(ctx context.Context, apiCfg *config.APIConfig, 
 	if err != nil {
 		return fmt.Errorf("修订章节失败: %w", err)
 	}
-	ch.Content = revisedContent
 	logger.InfoKey("log.prose_specific_revised", prose.CountProseUnits(revisedContent))
 
 	logger.StepInfo(2, 2, "重新提炼摘要...")
-	summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, ch.Content, logger)
+	summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, revisedContent, logger)
 	if summary == "" {
 		return fmt.Errorf("摘要提炼失败或被取消")
 	}
+	ch.Content = revisedContent
 	ch.Summary = summary
 
 	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
@@ -540,8 +519,11 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 	outlineConstraints := buildOutlineConstraintsForLang(state, idx, lang)
 	memoryContext := buildMemoryForLang(state, idx, lang)
 
-	minLen, maxLen := calcChapterLengthRange(snapshot.TargetWordsPerChapter)
 	targetWords := snapshot.TargetWordsPerChapter
+	if strictWordCount(cfg, SkillScopeChapterGenerate) {
+		targetWords = cfg.Story.TargetWordsPerChapter
+	}
+	minLen, maxLen := configuredChapterRange(targetWords, cfg, SkillScopeChapterGenerate)
 
 	userPrompt := config.RenderPrompt(cfg.Prompts.ChapterWriting, map[string]string{
 		"Title":              preferUserValue(cfg.Story.Title, state.Title),
@@ -564,6 +546,7 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 		"OutlineConstraints": outlineConstraints,
 	})
 	userPrompt = finalizeChapterWritingPrompt(cfg.Prompts.ChapterWriting, userPrompt, minLen, maxLen, targetWords, lang)
+	userPrompt += deskWritingGuidance(state, ch, ch.DeskVersion, lang)
 	if block := formatExtraWritingConstraintsBlock(extraWritingConstraints, lang); block != "" {
 		userPrompt += "\n\n" + block
 	}
@@ -860,6 +843,7 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	contextChapter.Outline += "\n" + userFeedback
 	characterContext, worldviewContext := buildChapterSettingsContexts(settings, contextChapter, lang)
 
+	original := revisionBlocks(ch)
 	userPrompt := config.RenderPrompt(cfg.Prompts.ChapterRevision, map[string]string{
 		"ChapterNum":       fmt.Sprintf("%d", ch.Num),
 		"ChapterTitle":     ch.Title,
@@ -869,11 +853,19 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 		"WritingPOV":       cfg.Story.WritingPOV,
 		"CharacterContext": characterContext,
 		"WorldviewContext": worldviewContext,
-		"OriginalContent":  ch.Content,
+		"OriginalContent":  original,
 		"UserFeedback":     userFeedback,
 	})
 	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.UserFeedback}}", userFeedback)
+	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.OriginalContent}}", original)
+	userPrompt += revisionPacingContext(state, ch, lang)
+	userPrompt += deskWritingGuidance(state, ch, ch.DeskVersion, lang)
 	userPrompt += factProtection(state, ch.Num, lang)
+	target := cfg.Story.TargetWordsPerChapter
+	lo, hi := configuredChapterRange(target, cfg, SkillScopeChapterRevise)
+	if strictWordCount(cfg, SkillScopeChapterRevise) {
+		userPrompt += "\n" + formatChapterLengthRequirementBlock(lo, hi, target, lang)
+	}
 
 	systemPrompt := state.CorePrompt
 	if systemPrompt == "" {
@@ -890,7 +882,11 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	if err != nil {
 		return "", err
 	}
-	return stripChapterMetaProse(content, lang), nil
+	content = stripChapterMetaProse(content, lang)
+	if strictWordCount(cfg, SkillScopeChapterRevise) {
+		return recoverChapterLengthBest(ctx, apiCfg, cfg, content, lo, hi, target, proseLengthScore(prose.CountProseUnits(content), lo, hi, target), userFeedback, true, logger)
+	}
+	return content, nil
 }
 
 func reviseSubsequentOutlines(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, state *Progress, currentIdx int, userFeedback string) error {
@@ -925,11 +921,12 @@ func reviseSubsequentOutlines(ctx context.Context, apiCfg *config.APIConfig, cfg
 		feedbackWrap = fmt.Sprintf("用户对第%d章提出了修改意见：%s\n请仅在该意见影响后续剧情时调整后续章节大纲；若意见只是文字细节修改，请原样返回大纲。", state.Chapters[currentIdx].Num, userFeedback)
 	}
 
-	userPrompt := config.RenderPrompt(cfg.Prompts.OutlineRevision, map[string]string{
+	userPrompt := config.RenderPrompt(cfg.Prompts.OutlineRevision, mergeOutlinePromptData(map[string]string{
 		"CurrentOutline": subsequentChapters,
 		"UserFeedback":   feedbackWrap,
 		"LockedChapters": lockedChapters,
-	})
+	}, cfg, nil))
+	userPrompt = finalizeOutlinePrompt(cfg.Prompts.OutlineRevision, userPrompt, cfg, nil)
 
 	systemPrompt := i18n.SystemPromptFor(lang, "outline_editor_locked_json")
 
@@ -946,7 +943,11 @@ func reviseSubsequentOutlines(ctx context.Context, apiCfg *config.APIConfig, cfg
 
 	for _, newCh := range resp.Chapters {
 		for i, existingCh := range state.Chapters {
-			if existingCh.Num == newCh.Num && existingCh.Status != StatusAccepted {
+			if i > currentIdx && existingCh.Num == newCh.Num && existingCh.Status != StatusAccepted {
+				lo, _ := outlineRange(cfg)
+				if len(validateOutlineChapterLengths([]OutlineChapter{newCh}, lo, lang)) > 0 {
+					continue
+				}
 				state.Chapters[i].Title = newCh.Title
 				state.Chapters[i].Outline = newCh.Outline
 			}

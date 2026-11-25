@@ -3,13 +3,14 @@ package i18n
 // messageCatalog holds localized UI/log/agent status strings (key → zh/en template).
 // Templates use fmt.Sprintf verbs (%s, %d, %v). Frontend mirrors keys with {0},{1},… placeholders.
 var messageCatalog = map[string]map[string]string{
-	"log.history_degraded":          {LangZH: "历史摘要暂用本地截断内容；下次使用时将重试生成。", LangEN: "History summaries are using locally shortened text; generation will be retried on next use."},
-	"log.knowledge_failed":          {LangZH: "事实或设定同步未完成，可在写作页重试：%v", LangEN: "Fact or setting sync incomplete; retry from Writing: %v"},
-	"log.skills_activated":          {LangZH: "本次流程已激活 Skill：%s", LangEN: "Skills activated for this task: %s"},
-	"log.skill_validation_done":     {LangZH: "Skill「%s」AI 校验完成", LangEN: "AI validation completed for skill \"%s\""},
-	"log.skill_validation_failed":   {LangZH: "Skill AI 校验失败：%s", LangEN: "Skill AI validation failed: %s"},
-	"log.skill_optimization_done":   {LangZH: "Skill 优化副本「%s」已生成并复检", LangEN: "Optimized skill copy \"%s\" was created and revalidated"},
-	"log.skill_optimization_failed": {LangZH: "Skill AI 优化失败：%s", LangEN: "Skill AI optimization failed: %s"},
+	"log.history_degraded":                {LangZH: "历史摘要暂用本地截断内容；下次使用时将重试生成。", LangEN: "History summaries are using locally shortened text; generation will be retried on next use."},
+	"log.knowledge_failed":                {LangZH: "事实或设定同步未完成，可在写作页重试：%v", LangEN: "Fact or setting sync incomplete; retry from Writing: %v"},
+	"log.skills_activated":                {LangZH: "本次流程已激活 Skill：%s", LangEN: "Skills activated for this task: %s"},
+	"log.skill_validation_done":           {LangZH: "Skill「%s」AI 校验完成", LangEN: "AI validation completed for skill \"%s\""},
+	"log.skill_validation_failed":         {LangZH: "Skill AI 校验失败：%s", LangEN: "Skill AI validation failed: %s"},
+	"log.skill_optimization_done":         {LangZH: "Skill 优化副本「%s」已生成并复检", LangEN: "Optimized skill copy \"%s\" was created and revalidated"},
+	"log.skill_optimization_needs_review": {LangZH: "优化副本「%s」仍需复核：%s", LangEN: "Optimized copy \"%s\" still needs review: %s"},
+	"log.skill_optimization_failed":       {LangZH: "Skill AI 优化失败：%s", LangEN: "Skill AI optimization failed: %s"},
 	// ---- Task / handler logs ----
 	"log.autoconfirm_on": {
 		LangZH: "已开启自动确认模式：每章生成完成后将自动确认并继续生成下一章",
@@ -287,15 +288,15 @@ var messageCatalog = map[string]map[string]string{
 	},
 	"log.prose_done": {
 		LangZH: "正文撰写完毕，共 %d 字",
-		LangEN: "Prose complete — %d characters",
+		LangEN: "Prose complete — %d words",
 	},
 	"log.chapter_length_retry": {
 		LangZH: "[字数控制] 当前 %d 字，要求 %d–%d 字，正在第 %d 次重新撰写...",
-		LangEN: "[Length] Draft is %d chars, need %d–%d — regenerating (attempt %d)...",
+		LangEN: "[Length] Draft is %d words, need %d–%d — regenerating (attempt %d)...",
 	},
 	"log.chapter_length_adjust": {
 		LangZH: "[字数控制] 重写后仍为 %d 字（要求 %d–%d 字），正在对原文压缩/扩展...",
-		LangEN: "[Length] Still %d chars after rewrite (need %d–%d) — compressing/expanding draft...",
+		LangEN: "[Length] Still %d words after rewrite (need %d–%d) — compressing/expanding draft...",
 	},
 	"log.chapter_length_adjust_failed": {
 		LangZH: "[字数控制] 压缩/扩展失败: %v，保留最佳稿",
@@ -303,19 +304,19 @@ var messageCatalog = map[string]map[string]string{
 	},
 	"log.chapter_length_soft_keep": {
 		LangZH: "[字数控制] 最佳稿 %d 字略超/略低于 %d–%d 字，在容忍范围内，跳过压缩/扩展",
-		LangEN: "[Length] Best draft %d chars is slightly outside %d–%d — within soft tolerance, skipping adjust",
+		LangEN: "[Length] Best draft %d words is slightly outside %d–%d — within soft tolerance, skipping adjust",
 	},
 	"log.chapter_length_skip_adjust": {
 		LangZH: "[字数控制] 最佳稿 %d 字偏离 %d–%d 字过多，跳过压缩/扩展",
-		LangEN: "[Length] Best draft %d chars too far from %d–%d — skipping adjust",
+		LangEN: "[Length] Best draft %d words too far from %d–%d — skipping adjust",
 	},
 	"log.chapter_length_adjust_reverted": {
 		LangZH: "[字数控制] 压缩/扩展后 %d 字未优于最佳稿 %d 字（要求 %d–%d 字），保留最佳稿",
-		LangEN: "[Length] After adjust %d chars not better than best %d (need %d–%d) — keeping best draft",
+		LangEN: "[Length] After adjust %d words not better than best %d (need %d–%d) — keeping best draft",
 	},
 	"log.chapter_length_off_range": {
-		LangZH: "[字数控制] 压缩/扩展后仍为 %d 字（要求 %d–%d 字），请用户在审核时处理；自动确认模式下将继续下一章",
-		LangEN: "[Length] Still %d chars after adjust (need %d–%d) — please review manually; auto-confirm will continue to the next chapter",
+		LangZH: "[字数控制] 压缩/扩展后仍为 %d 字（要求 %d–%d 字），请用户在审核时处理",
+		LangEN: "[Length] Still %d words after adjust (need %d–%d) — please review manually",
 	},
 	"log.summary_done": {
 		LangZH: "摘要提炼完成",
@@ -363,7 +364,7 @@ var messageCatalog = map[string]map[string]string{
 	},
 	"log.prose_revised": {
 		LangZH: "正文修改完毕，共 %d 字",
-		LangEN: "Revision complete — %d characters",
+		LangEN: "Revision complete — %d words",
 	},
 	"log.subsequent_outline_failed": {
 		LangZH: "后续大纲修订失败: %v（不影响当前章节）",

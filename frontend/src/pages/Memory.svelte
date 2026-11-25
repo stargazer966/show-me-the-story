@@ -35,7 +35,7 @@
   function formatEntryLine(e) {
     const snippet = extractSnippet(e);
     if (snippet) {
-      return `${e.content}（原文：「${snippet}」）`;
+      return $t('memory.copy.withSource', { content: e.content, snippet });
     }
     return e.content;
   }

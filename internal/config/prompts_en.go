@@ -172,7 +172,7 @@ Rules:
 1. Locked chapter contents may not be changed; only unlocked chapters may be edited.
 2. Keep the total chapter count and numbering unchanged unless the feedback explicitly requires adding or removing chapters.
 3. Return chapters unrelated to the feedback verbatim. Do not refactor them while you're at it.
-4. Unlocked chapter outlines must be {{.OutlineMinWords}}–{{.OutlineMaxWords}} characters with concrete beats (scene, conflict, turning point, characters, hook); keep characters in sync (proper names only; new cast first_appearance+note); prefer [Registered characters].
+4. Unlocked chapter outlines must be {{.OutlineMinWords}}–{{.OutlineMaxWords}} words with concrete beats (scene, conflict, turning point, characters, hook); keep characters in sync (proper names only; new cast first_appearance+note); prefer [Registered characters].
 5. Output strict JSON only. No extra prose.`,
 
 	ForeshadowPlanning: `You are a senior narrative architect who specialises in foreshadow design. Design a foreshadow plan for the novel outline below.
@@ -282,7 +282,7 @@ Return JSON:
 
 Rules:
 1. The outlines must continue the existing storyline coherently.
-2. Each outline field must be {{.OutlineMinWords}}–{{.OutlineMaxWords}} characters with concrete plot beats — no vague summaries.
+2. Each outline field must be {{.OutlineMinWords}}–{{.OutlineMaxWords}} words with concrete plot beats — no vague summaries.
 3. Cover opening scene, core conflict, turning point, characters with roles, and ending hook.
 4. Every chapter MUST include characters (proper names only in name; new cast first_appearance=true with note).
 5. Prefer [Registered characters].

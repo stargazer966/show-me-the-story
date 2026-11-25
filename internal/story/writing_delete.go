@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"showmethestory/internal/fsutil"
 	"showmethestory/internal/i18n"
+	"slices"
 	"strings"
 )
 
@@ -67,16 +68,13 @@ func chapterHasDeletableContent(ch *ChapterState) bool {
 func purgeMemoryForChapter(state *Progress, chapterNum int) {
 	filtered := state.MemoryEntries[:0]
 	for _, m := range state.MemoryEntries {
-		keep := m.Inherited
-		for _, ref := range m.References {
-			if ref.Chapter != chapterNum {
-				keep = true
-				break
+		if !m.Inherited && len(m.References) > 0 {
+			m.References = slices.DeleteFunc(m.References, func(r MemoryReference) bool { return r.Chapter == chapterNum })
+			if len(m.References) == 0 {
+				continue
 			}
 		}
-		if keep {
-			filtered = append(filtered, m)
-		}
+		filtered = append(filtered, m)
 	}
 	state.MemoryEntries = filtered
 }

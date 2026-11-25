@@ -18,6 +18,7 @@ import (
 	"showmethestory/internal/sse"
 	"showmethestory/internal/story"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -33,6 +34,9 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("GET /api/projects", h.GetProjects)
 	mux.HandleFunc("GET /api/projects/{name}/backup", h.GetProjectBackup)
 	mux.HandleFunc("POST /api/projects/restore", h.PostProjectRestore)
+	mux.HandleFunc("GET /api/templates", h.listTemplates)
+	mux.HandleFunc("POST /api/templates", h.saveTemplate)
+	mux.HandleFunc("POST /api/image-draft", h.imageDraft)
 	mux.HandleFunc("POST /api/projects", h.PostProject)
 	mux.HandleFunc("POST /api/projects/continue", h.PostContinuationProject)
 	mux.HandleFunc("GET /api/projects/current", h.GetProjectCurrent)
@@ -60,6 +64,7 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("DELETE /api/progress", h.DeleteProgress)
 	mux.HandleFunc("GET /api/status", h.GetStatus)
 
+	mux.HandleFunc("POST /api/story-desk", h.storyDesk)
 	mux.HandleFunc("POST /api/outline/revise", h.PostOutlineRevise)
 	mux.HandleFunc("POST /api/outline/generate-continuation", h.PostOutlineGenerateContinuation)
 	mux.HandleFunc("POST /api/story/complete", h.PostStoryComplete)
@@ -87,6 +92,17 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("POST /api/chapters/smooth-transitions", h.PostChaptersSmoothTransitions)
 
 	mux.HandleFunc("GET /api/proofread", h.GetProofread)
+	mux.HandleFunc("GET /api/proofread/prose", h.exportProofreadProse)
+	mux.HandleFunc("GET /api/proofread/chapters/{num}", h.getProofreadChapter)
+	mux.HandleFunc("POST /api/proofread/chapters/{num}/sync", h.syncProofreadChapter)
+	mux.HandleFunc("POST /api/proofread/chapters/{num}/adopt", h.adoptProofreadChapter)
+	mux.HandleFunc("GET /api/history", h.workflowHistory)
+	mux.HandleFunc("POST /api/history/{id}", h.restoreHistory)
+	mux.HandleFunc("POST /api/writing/confirm/{num}", h.confirmSelectedChapter)
+	mux.HandleFunc("GET /api/writing/candidate/{num}", h.proseCandidate)
+	mux.HandleFunc("POST /api/writing/candidate/{num}", h.proseCandidate)
+	mux.HandleFunc("POST /api/writing/generate/{num}", h.generateSelectedProse)
+	mux.HandleFunc("PUT /api/writing/candidate/{num}", h.proseCandidate)
 	mux.HandleFunc("DELETE /api/proofread", h.DeleteProofread)
 	mux.HandleFunc("POST /api/proofread/backup", h.PostProofreadBackup)
 	mux.HandleFunc("POST /api/proofread/analyze", h.PostProofreadAnalyze)
@@ -97,6 +113,8 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("DELETE /api/proofread/chapters/{num}/blocks/{id}", h.DeleteProofreadBlock)
 	mux.HandleFunc("POST /api/proofread/chapters/{num}/blocks", h.PostProofreadBlock)
 	mux.HandleFunc("GET /api/proofread/export", h.GetProofreadExport)
+	mux.HandleFunc("POST /api/chapters/{num}/removal-preview", h.chapterRemoval)
+	mux.HandleFunc("DELETE /api/chapters/{num}", h.chapterRemoval)
 	mux.HandleFunc("DELETE /api/chapter", h.DeleteChapter)
 	mux.HandleFunc("DELETE /api/chapters/from/{num}", h.DeleteChaptersFrom)
 	mux.HandleFunc("DELETE /api/outline", h.DeleteOutline)
@@ -146,6 +164,7 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("POST /api/skill-library/install", h.PostSkillInstall)
 	mux.HandleFunc("GET /api/skill-library/{id}", h.GetSkillLibraryItem)
 	mux.HandleFunc("DELETE /api/skill-library/{id}", h.DeleteSkillLibraryItem)
+	mux.HandleFunc("PUT /api/skill-library/{id}/scopes", h.PutSkillScopes)
 	mux.HandleFunc("POST /api/skill-library/{id}/validate", h.PostSkillValidate)
 	mux.HandleFunc("POST /api/skill-library/{id}/optimize", h.PostSkillOptimize)
 
@@ -177,7 +196,7 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 		fileServer.ServeHTTP(w, r)
 	})
 
-	handler := recoveryMiddleware(corsMiddleware(loggingMiddleware(projectWriteMiddleware(mux))))
+	handler := recoveryMiddleware(corsMiddleware(loggingMiddleware(projectWriteMiddleware(h.recordWorkflowHistory(mux)))))
 
 	srv := &http.Server{
 		Addr:         port,
@@ -226,6 +245,7 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 		phase := ""
 		title := ""
 		bookStatus := ""
+		var outlined, written, drafts int
 		progressPath := filepath.Join(projectDir, "progress.json")
 		if data, err := os.ReadFile(progressPath); err == nil {
 			var p story.Progress
@@ -233,6 +253,24 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 				phase = p.Phase
 				title = p.Title
 				bookStatus = p.BookStatus
+				if compatibility == projectCompatibilitySupported {
+					for _, chapter := range p.Chapters {
+						if chapter.Inherited {
+							continue
+						}
+						if strings.TrimSpace(chapter.Outline) != "" {
+							outlined++
+						}
+						if chapter.WordCount > 0 {
+							written++
+						}
+					}
+					for _, part := range p.Desk.Parts {
+						if !part.Deleted && strings.TrimSpace(part.Beats) != "" {
+							drafts++
+						}
+					}
+				}
 			}
 		}
 
@@ -259,6 +297,9 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 		info := map[string]string{
 			"name":                    name,
 			"phase":                   phase,
+			"outlined_chapters":       strconv.Itoa(outlined),
+			"written_chapters":        strconv.Itoa(written),
+			"draft_chapters":          strconv.Itoa(drafts),
 			"book_status":             bookStatus,
 			"title":                   title,
 			"language":                lang,
@@ -286,40 +327,95 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) PostProject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Template string
+		Premise  string
 		Name     string `json:"name"`
 		Language string `json:"language"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "missing_project_name")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json")
 		return
 	}
 
 	name := strings.TrimSpace(req.Name)
 	lang := i18n.NormalizeLanguage(req.Language)
 
-	if !validProjectName(name) {
+	if name != "" && !validProjectName(name) {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "project_name_invalid_chars")
 		return
 	}
 
+	cfg := config.DefaultConfigForLang(lang)
+	if lang == "en" {
+		cfg.SkillConfig.EnabledSkills["english-word-count-control"] = true
+	}
+	var settings *story.ProjectSettings
+	if req.Template != "" {
+		t, err := h.readTemplate(req.Template)
+		if err != nil {
+			h.writeErrorReq(w, r, 400, "invalid_request", err.Error())
+			return
+		}
+		cfg = t.Config
+		settings = t.Settings
+		lang = cfg.Language
+		if strings.TrimSpace(req.Name) != "" {
+			cfg.Story.Title = name
+		} else {
+			cfg.Story.Title = ""
+		}
+	}
+	if name == "" {
+		base := "Untitled project"
+		if lang == "zh" {
+			base = "未命名项目"
+		}
+		for n := 1; ; n++ {
+			name = base
+			if n > 1 {
+				name = fmt.Sprintf("%s %d", base, n)
+			}
+			_, err := os.Lstat(filepath.Join(h.storysDir(), name))
+			if os.IsNotExist(err) {
+				break
+			}
+			if err != nil {
+				h.writeErrorReq(w, r, 500, "init_project_config_failed", err)
+				return
+			}
+		}
+	}
+
 	projectDir := filepath.Join(h.storysDir(), name)
-	if _, err := os.Stat(projectDir); err == nil {
+	if _, err := os.Lstat(projectDir); err == nil {
 		h.writeErrorReq(w, r, http.StatusConflict, "project_exists")
 		return
-	}
-
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
-		h.writeErrorReq(w, r, http.StatusInternalServerError, "create_project_dir_failed", err.Error())
+	} else if !os.IsNotExist(err) {
+		h.writeErrorReq(w, r, 500, "init_project_config_failed", err)
 		return
 	}
 
-	sessionsDir := filepath.Join(projectDir, "sessions")
-	os.MkdirAll(sessionsDir, 0755)
-
-	cfg := config.DefaultConfigForLang(lang)
 	cfg.CreatedWithVersion = h.version
-	if err := config.SaveConfig(filepath.Join(projectDir, "config.json"), cfg); err != nil {
-		h.writeErrorReq(w, r, http.StatusInternalServerError, "init_project_config_failed", err)
+	err := os.MkdirAll(h.storysDir(), 0755)
+	var stage string
+	if err == nil {
+		stage, err = os.MkdirTemp(h.storysDir(), ".restore-")
+	}
+	if err == nil {
+		defer os.RemoveAll(stage)
+		err = config.SaveConfig(filepath.Join(stage, "config.json"), cfg)
+	}
+	if err == nil && settings != nil {
+		err = story.SaveProjectSettings(filepath.Join(stage, "settings.json"), settings)
+	}
+	if err == nil {
+		err = story.SaveProgress(filepath.Join(stage, "progress.json"), &story.Progress{Phase: "writing", BookStatus: story.BookStatusActive, CorePrompt: strings.TrimSpace(req.Premise), Title: cfg.Story.Title})
+	}
+	if err == nil {
+		err = os.Rename(stage, projectDir)
+	}
+	if err != nil {
+		h.writeErrorReq(w, r, 500, "init_project_config_failed", err)
 		return
 	}
 
