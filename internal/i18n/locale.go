@@ -420,6 +420,8 @@ var errorCatalog = map[string]map[string]string{
 	},
 	"skill_install_failed":  {LangZH: "Skill 安装失败：%s", LangEN: "Failed to install skill: %s"},
 	"skill_delete_failed":   {LangZH: "Skill 删除失败：%s", LangEN: "Failed to delete skill: %s"},
+	"skill_scopes_required": {LangZH: "至少选择一个适用操作", LangEN: "Select at least one scope"},
+	"skill_scope_invalid":   {LangZH: "不支持的适用操作：%s", LangEN: "Unsupported skill scope: %s"},
 	"skill_cannot_enable":   {LangZH: "当前校验状态禁止启用 Skill：%s", LangEN: "Skill cannot be enabled in validation state: %s"},
 	"skill_not_optimizable": {LangZH: "该 Skill 当前不可进行 AI 优化", LangEN: "This skill cannot currently be AI-optimized"},
 	"invalid_request":       {LangZH: "无效请求：%s", LangEN: "Invalid request: %s"},

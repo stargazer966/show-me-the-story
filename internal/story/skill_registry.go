@@ -22,6 +22,9 @@ const (
 	maxSkillTotalSize = 10 << 20
 )
 
+const maxSkillIDLength = 64
+const maxSkillReferenceBytes = 96 << 10
+
 var skillIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 type SkillManifest struct {
@@ -368,7 +371,7 @@ func loadSkillPackage(dir, id string, rec SkillRegistryRecord) (Skill, error) {
 				if ext := strings.ToLower(filepath.Ext(rel)); ext == ".md" || ext == ".txt" {
 					if b, readErr := os.ReadFile(path); readErr == nil {
 						chunk := "\n\n## " + rel + "\n\n" + string(b)
-						if len(s.ReferenceContent)+len(chunk) <= 64<<10 {
+						if len(s.ReferenceContent)+len(chunk) <= maxSkillReferenceBytes {
 							s.ReferenceContent += chunk
 						}
 					}
@@ -428,13 +431,46 @@ func DeleteGlobalSkill(progDir, id string) error {
 }
 
 func NextOptimizedSkillID(progDir, base string) string {
-	candidate := base + "-optimized"
-	for n := 2; ; n++ {
-		if _, err := os.Stat(filepath.Join(SkillLibraryDir(progDir), candidate)); os.IsNotExist(err) {
+	for n := 1; ; n++ {
+		suffix := "-optimized"
+		if n > 1 {
+			suffix = fmt.Sprintf("-optimized-%d", n)
+		}
+		candidate := base[:min(len(base), maxSkillIDLength-len(suffix))] + suffix
+		if _, err := os.Stat(filepath.Join(SkillLibraryDir(progDir), candidate)); err != nil {
 			return candidate
 		}
-		candidate = fmt.Sprintf("%s-optimized-%d", base, n)
 	}
+}
+
+// OptimizedSkillFiles keeps the original package layout and reference documents.
+func OptimizedSkillFiles(progDir string, source Skill, manifest SkillManifest, content string) (map[string][]byte, error) {
+	if !skillIDPattern.MatchString(source.ID) {
+		return nil, fmt.Errorf("invalid source skill id")
+	}
+	dir := filepath.Join(SkillLibraryDir(progDir), source.ID)
+	files := make(map[string][]byte, len(source.Resources)+2)
+	for _, name := range source.Resources {
+		rel, err := safeSkillRelativePath(name)
+		if err != nil {
+			return nil, err
+		}
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		info, err := os.Lstat(path)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() || info.Size() > maxSkillFileSize {
+			return nil, fmt.Errorf("invalid skill resource %q", name)
+		}
+		files[rel], err = os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files[manifest.EntryPoint] = []byte(content)
+	files["skill.json"], _ = json.MarshalIndent(manifest, "", "  ")
+	return files, nil
 }
 
 // PrepareSkillImport adds the registry metadata for loose writing instructions.

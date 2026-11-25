@@ -56,5 +56,8 @@ func (h *Handlers) storyDesk(w http.ResponseWriter, r *http.Request) {
 	if req.Action == "use" || req.Action == "generate" || req.Action == "manual_outline" {
 		h.broadcastProgress()
 	}
+	if req.Action == "apply_setting" || req.Action == "undo_setting" {
+		h.logger.SettingsUpdated()
+	}
 	h.writeJSON(w, 200, result)
 }

@@ -22,18 +22,22 @@ type DeskDraft struct {
 	Remarks []string `json:"remarks,omitempty"`
 }
 type DeskVersion struct {
-	Title        string    `json:"title,omitempty"`
-	Source       DeskDraft `json:"source"`
-	Context      string    `json:"context,omitempty"`
-	Lines        []string  `json:"lines"`
-	Instructions []string  `json:"instructions,omitempty"`
+	SettingSuggestions []DeskSettingSuggestion `json:"setting_suggestions,omitempty"`
+	Title              string                  `json:"title,omitempty"`
+	Source             DeskDraft               `json:"source"`
+	Context            string                  `json:"context,omitempty"`
+	Lines              []string                `json:"lines"`
+	Instructions       []string                `json:"instructions,omitempty"`
 }
 type DeskPart struct {
+	Deleted          bool `json:"deleted,omitempty"`
 	PreviouslyLinked bool `json:"previously_linked,omitempty"`
 	DeskDraft
 	Versions []DeskVersion `json:"versions"`
 }
 type DeskRequest struct {
+	Suggestion        int       `json:"suggestion"`
+	SettingValue      *string   `json:"setting_value"`
 	Project           string    `json:"project"`
 	Action            string    `json:"action"`
 	Revision          int       `json:"revision"`
@@ -177,7 +181,7 @@ func deskPrompt(cfg *config.Config, state *Progress, settings *ProjectSettings, 
 		return DeskPrompt{}, 0, errors.New("Add a beat first")
 	}
 	data["required_output_lines"] = count
-	system := instructions
+	system := instructions + deskSettingInstructions(cfg.Language)
 	if req.Comment != "" && req.Beat > 0 {
 		if cfg.Language == "en" {
 			system += " Return one outline line and one writing instruction for the selected beat in the JSON."
@@ -272,7 +276,26 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 			return nil, errors.New("Select a part")
 		}
 		part := &next.Desk.Parts[req.Part-1]
+		if part.Deleted && req.Action != "restore" {
+			return nil, errors.New("Restore this chapter before editing it")
+		}
 		switch req.Action {
+		case "delete":
+			part.Deleted = true
+			changed = true
+		case "restore":
+			if !part.Deleted {
+				return nil, errors.New("This chapter is already in Story Desk")
+			}
+			part.Deleted = false
+			changed = true
+		case "apply_setting", "dismiss_setting", "undo_setting":
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if err := decideDeskSetting(path, &next, settings, *part, req); err != nil {
+				return nil, err
+			}
 		case "manual_outline":
 			if req.Version < 1 || req.Version > len(part.Versions) {
 				return nil, errors.New("Select an outline version")
@@ -293,6 +316,7 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 					return nil, errors.New("Add outline text for each beat")
 				}
 			}
+			updated.SettingSuggestions = nil
 			updated.Lines = req.Lines
 			updated.Instructions = req.Instructions
 			part.Versions = append(slices.Clone(part.Versions), updated)
@@ -322,9 +346,10 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 				return nil, err
 			}
 			var reply struct {
-				Title        string   `json:"title"`
-				Lines        []string `json:"lines"`
-				Instructions []string `json:"instructions"`
+				Title              string          `json:"title"`
+				Lines              []string        `json:"lines"`
+				Instructions       []string        `json:"instructions"`
+				SettingSuggestions json.RawMessage `json:"setting_suggestions"`
 			}
 			if err := json.Unmarshal([]byte(cleanJSONResponse(raw)), &reply); err != nil || len(reply.Lines) != count {
 				return nil, errors.New("Model returned an incomplete outline. Your draft and earlier versions are saved.")
@@ -385,7 +410,7 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 				words := strings.Fields(seed)
 				title = strings.TrimRight(truncateRunes(strings.Join(words[:min(8, len(words))], " "), 60), ".。!?！？")
 			}
-			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Title: title, Source: input.DeskDraft, Context: deskContext(cfg, &next, settings, input.DeskDraft), Lines: reply.Lines, Instructions: guidance})
+			part.Versions = append(slices.Clone(part.Versions), DeskVersion{Title: title, Source: input.DeskDraft, Context: deskContext(cfg, &next, settings, input.DeskDraft), Lines: reply.Lines, Instructions: guidance, SettingSuggestions: deskSuggestions(settings, input.DeskDraft, reply.Lines, reply.SettingSuggestions, req.Beat)})
 			changed = true
 		default:
 			return nil, errors.New("Unknown desk action")
@@ -408,7 +433,7 @@ func RunDesk(ctx context.Context, path string, state *Progress, cfg *config.Conf
 		contexts[i] = deskContext(cfg, &next, settings, p.DeskDraft)
 	}
 	view := ProgressView(&next)
-	result := map[string]any{"desk": next.Desk, "chapters": view.Chapters, "direction": next.LongTermDirection, "contexts": contexts}
+	result := map[string]any{"desk": next.Desk, "chapters": view.Chapters, "direction": next.LongTermDirection, "contexts": contexts, "setting_decisions": deskSettingDecisions(settings)}
 	if req.Action == "use" || req.Action == "generate" || req.Action == "manual_outline" {
 		result["progress"] = view
 	}

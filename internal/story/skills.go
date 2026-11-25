@@ -181,13 +181,22 @@ func MergeSkills(builtin, project []Skill) []Skill {
 }
 
 // ResolveSkills returns enabled skills that explicitly apply to action.
+func EffectiveSkillScopes(sc *config.SkillConfig, id string, defaults []string) []string {
+	if sc != nil {
+		if scopes := sc.ScopeOverrides[id]; len(scopes) > 0 {
+			return scopes
+		}
+	}
+	return defaults
+}
+
 func ResolveSkills(skills []Skill, sc *config.SkillConfig, action, projectLang string) []Skill {
 	var out []Skill
 	for _, s := range GetEnabledSkills(skills, sc) {
 		if s.Lang != "" && i18n.NormalizeLanguage(s.Lang) != i18n.NormalizeLanguage(projectLang) {
 			continue
 		}
-		for _, scope := range s.AppliesTo {
+		for _, scope := range EffectiveSkillScopes(sc, s.ID, s.AppliesTo) {
 			if scope == action {
 				out = append(out, s)
 				break

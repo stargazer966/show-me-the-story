@@ -118,10 +118,10 @@ func TestCompatibilityVersions(t *testing.T) {
 	}
 }
 
-func TestGetProjectsUsesConfiguredTitleAndCompletedStatus(t *testing.T) {
+func TestGetProjectsUsesConfiguredTitleAndProgress(t *testing.T) {
 	root := t.TempDir()
 	writeProjectFile(t, root, "storys/done/config.json", `{"project_format_version":4,"language":"zh","story":{"title":"配置书名"}}`)
-	writeProjectFile(t, root, "storys/done/progress.json", `{"phase":"writing","title":"","book_status":"completed","chapters":[]}`)
+	writeProjectFile(t, root, "storys/done/progress.json", `{"phase":"writing","title":"","book_status":"completed","chapters":[{"num":1,"outline":"First beat","word_count":700},{"num":2,"outline":"Second beat"},{"num":3,"outline":"Inherited beat","word_count":350,"inherited":true}],"story_desk":{"parts":[{"beats":"First beat"},{"beats":"Deleted beat","deleted":true}]}}`)
 
 	h := NewHandlers(nil, "", nil, root, "test")
 	response := httptest.NewRecorder()
@@ -131,7 +131,8 @@ func TestGetProjectsUsesConfiguredTitleAndCompletedStatus(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &projects); err != nil {
 		t.Fatal(err)
 	}
-	if len(projects) != 1 || projects[0]["title"] != "配置书名" || projects[0]["book_status"] != story.BookStatusCompleted {
+	if len(projects) != 1 || projects[0]["title"] != "配置书名" || projects[0]["book_status"] != story.BookStatusCompleted ||
+		projects[0]["outlined_chapters"] != "2" || projects[0]["written_chapters"] != "1" || projects[0]["draft_chapters"] != "1" {
 		t.Fatalf("projects = %#v", projects)
 	}
 }

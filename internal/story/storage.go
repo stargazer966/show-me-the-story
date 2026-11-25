@@ -377,6 +377,7 @@ func ProgressView(p *Progress) *Progress {
 	cp.ProseCandidates = nil
 	cp.Chapters = make([]ChapterState, len(p.Chapters))
 	for i, ch := range p.Chapters {
+		ch.WritingGuidance = deskGuidance(p, ch, ch.DeskVersion)
 		if ch.Content != "" {
 			if ch.WordCount == 0 {
 				ch.WordCount = prose.CountProseUnits(ch.Content)

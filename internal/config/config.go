@@ -191,7 +191,8 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 type SkillConfig struct {
-	EnabledSkills map[string]bool `json:"enabled_skills"`
+	EnabledSkills  map[string]bool     `json:"enabled_skills"`
+	ScopeOverrides map[string][]string `json:"scope_overrides,omitempty"`
 }
 
 func (sc *SkillConfig) ApplyDefaults() {

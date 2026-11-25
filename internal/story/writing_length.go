@@ -8,6 +8,7 @@ import (
 	"showmethestory/internal/llm"
 	"showmethestory/internal/prose"
 	"showmethestory/internal/sse"
+	"slices"
 	"strings"
 )
 
@@ -42,21 +43,23 @@ func calcChapterLengthRange(targetWordsPerChapter int) (minLen, maxLen int) {
 	return minLen, maxLen
 }
 
-func strictWordCount(cfg *config.Config) bool {
-	return cfg.Language == "en" && cfg.SkillConfig != nil && cfg.SkillConfig.EnabledSkills["english-word-count-control"]
+func strictWordCount(cfg *config.Config, scope string) bool {
+	const id = "english-word-count-control"
+	return cfg.Language == "en" && cfg.SkillConfig != nil && cfg.SkillConfig.EnabledSkills[id] &&
+		slices.Contains(EffectiveSkillScopes(cfg.SkillConfig, id, []string{SkillScopeChapterGenerate, SkillScopeChapterRevise}), scope)
 }
 
 // ChapterNeedsLengthReview pauses auto-confirm if a bounded adjustment still missed its target.
 func ChapterNeedsLengthReview(cfg *config.Config, ch ChapterState) bool {
-	if !strictWordCount(cfg) {
+	if !strictWordCount(cfg, SkillScopeChapterGenerate) {
 		return false
 	}
-	lo, hi := configuredChapterRange(cfg.Story.TargetWordsPerChapter, cfg)
+	lo, hi := configuredChapterRange(cfg.Story.TargetWordsPerChapter, cfg, SkillScopeChapterGenerate)
 	return !chapterLengthInRange(ch.Content, lo, hi)
 }
 
-func configuredChapterRange(target int, cfg *config.Config) (int, int) {
-	if strictWordCount(cfg) {
+func configuredChapterRange(target int, cfg *config.Config, scope string) (int, int) {
+	if strictWordCount(cfg, scope) {
 		pct := cfg.Story.Tolerance
 		if pct <= 0 || pct > 100 {
 			pct = 10
@@ -228,7 +231,7 @@ Output ONLY the full revised chapter prose.
 	return stripChapterMetaProse(raw, lang), nil
 }
 
-func recoverChapterLengthBest(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, bestContent string, minLen, maxLen, target int, bestScore int, revisionFeedback string, logger *sse.LogBroadcaster) (string, error) {
+func recoverChapterLengthBest(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, bestContent string, minLen, maxLen, target int, bestScore int, revisionFeedback string, strict bool, logger *sse.LogBroadcaster) (string, error) {
 	if bestContent == "" {
 		return "", fmt.Errorf("正文生成失败或被取消")
 	}
@@ -236,14 +239,14 @@ func recoverChapterLengthBest(ctx context.Context, apiCfg *config.APIConfig, cfg
 	if chapterLengthInRange(bestContent, minLen, maxLen) {
 		return bestContent, nil
 	}
-	if !strictWordCount(cfg) && isSoftLengthDeviation(actual, minLen, maxLen) {
+	if !strict && isSoftLengthDeviation(actual, minLen, maxLen) {
 		if logger != nil {
 			logger.WarnKey("log.chapter_length_soft_keep", actual, minLen, maxLen)
 			logger.WarnKey("log.chapter_length_off_range", actual, minLen, maxLen)
 		}
 		return bestContent, nil
 	}
-	if !strictWordCount(cfg) && !shouldAttemptLengthAdjust(actual, minLen, maxLen) {
+	if !strict && !shouldAttemptLengthAdjust(actual, minLen, maxLen) {
 		if logger != nil {
 			logger.WarnKey("log.chapter_length_skip_adjust", actual, minLen, maxLen)
 			logger.WarnKey("log.chapter_length_off_range", actual, minLen, maxLen)
@@ -288,10 +291,10 @@ func generateChapterContentWithLengthControl(ctx context.Context, apiCfg *config
 		snapshot = &cfg.Story
 	}
 	target := snapshot.TargetWordsPerChapter
-	if strictWordCount(cfg) {
+	if strictWordCount(cfg, SkillScopeChapterGenerate) {
 		target = cfg.Story.TargetWordsPerChapter
 	}
-	minLen, maxLen := configuredChapterRange(target, cfg)
+	minLen, maxLen := configuredChapterRange(target, cfg, SkillScopeChapterGenerate)
 	lang := cfg.Language
 	lengthFeedback := ""
 	var bestContent string
@@ -320,5 +323,5 @@ func generateChapterContentWithLengthControl(ctx context.Context, apiCfg *config
 		}
 	}
 
-	return recoverChapterLengthBest(ctx, apiCfg, cfg, bestContent, minLen, maxLen, target, bestScore, strings.TrimSpace(deskWritingGuidance(state, state.Chapters[idx], state.Chapters[idx].DeskVersion, cfg.Language)), logger)
+	return recoverChapterLengthBest(ctx, apiCfg, cfg, bestContent, minLen, maxLen, target, bestScore, strings.TrimSpace(deskWritingGuidance(state, state.Chapters[idx], state.Chapters[idx].DeskVersion, cfg.Language)), strictWordCount(cfg, SkillScopeChapterGenerate), logger)
 }

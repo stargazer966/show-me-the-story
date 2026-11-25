@@ -520,10 +520,10 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 	memoryContext := buildMemoryForLang(state, idx, lang)
 
 	targetWords := snapshot.TargetWordsPerChapter
-	if strictWordCount(cfg) {
+	if strictWordCount(cfg, SkillScopeChapterGenerate) {
 		targetWords = cfg.Story.TargetWordsPerChapter
 	}
-	minLen, maxLen := configuredChapterRange(targetWords, cfg)
+	minLen, maxLen := configuredChapterRange(targetWords, cfg, SkillScopeChapterGenerate)
 
 	userPrompt := config.RenderPrompt(cfg.Prompts.ChapterWriting, map[string]string{
 		"Title":              preferUserValue(cfg.Story.Title, state.Title),
@@ -862,8 +862,8 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	userPrompt += deskWritingGuidance(state, ch, ch.DeskVersion, lang)
 	userPrompt += factProtection(state, ch.Num, lang)
 	target := cfg.Story.TargetWordsPerChapter
-	lo, hi := configuredChapterRange(target, cfg)
-	if strictWordCount(cfg) {
+	lo, hi := configuredChapterRange(target, cfg, SkillScopeChapterRevise)
+	if strictWordCount(cfg, SkillScopeChapterRevise) {
 		userPrompt += "\n" + formatChapterLengthRequirementBlock(lo, hi, target, lang)
 	}
 
@@ -883,8 +883,8 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 		return "", err
 	}
 	content = stripChapterMetaProse(content, lang)
-	if strictWordCount(cfg) {
-		return recoverChapterLengthBest(ctx, apiCfg, cfg, content, lo, hi, target, proseLengthScore(prose.CountProseUnits(content), lo, hi, target), userFeedback, logger)
+	if strictWordCount(cfg, SkillScopeChapterRevise) {
+		return recoverChapterLengthBest(ctx, apiCfg, cfg, content, lo, hi, target, proseLengthScore(prose.CountProseUnits(content), lo, hi, target), userFeedback, true, logger)
 	}
 	return content, nil
 }

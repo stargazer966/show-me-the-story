@@ -14,14 +14,15 @@ import (
 )
 
 type SettingChange struct {
-	ID       int             `json:"id"`
-	Kind     string          `json:"kind"`
-	EntityID string          `json:"entity_id"`
-	Before   map[string]any  `json:"before,omitempty"`
-	After    map[string]any  `json:"after,omitempty"`
-	Source   MemoryReference `json:"source"`
-	Status   string          `json:"status"` // applied, pending, rejected, reverted
-	Reason   string          `json:"reason,omitempty"`
+	Desk     *deskSettingDecision `json:"desk,omitempty"`
+	ID       int                  `json:"id"`
+	Kind     string               `json:"kind"`
+	EntityID string               `json:"entity_id"`
+	Before   map[string]any       `json:"before,omitempty"`
+	After    map[string]any       `json:"after,omitempty"`
+	Source   MemoryReference      `json:"source"`
+	Status   string               `json:"status"` // applied, pending, rejected, reverted
+	Reason   string               `json:"reason,omitempty"`
 }
 type settingDelta struct {
 	Kind      string         `json:"kind"`
@@ -247,6 +248,9 @@ func settingsAtChapter(s *ProjectSettings, num int) *ProjectSettings {
 func invalidateSettingSources(s *ProjectSettings, state *Progress) {
 	for i := len(s.StoryChanges) - 1; i >= 0; i-- {
 		c := &s.StoryChanges[i]
+		if c.Desk != nil {
+			continue
+		}
 		ci := FindChapterIdx(state, c.Source.Chapter)
 		valid := ci >= 0 && state.Chapters[ci].Status == StatusAccepted && ReferenceLive(state, c.Source)
 		if c.Status == "pending" && c.Reason == "source_changed" {
@@ -376,7 +380,7 @@ func applySettingDeltas(s *ProjectSettings, ch ChapterState, deltas []settingDel
 			for i := len(s.StoryChanges) - 1; i >= 0; i-- {
 				c := s.StoryChanges[i]
 				if c.EntityID == id && c.Status == "applied" {
-					owned = reflect.DeepEqual(c.After, before)
+					owned = c.Desk == nil && reflect.DeepEqual(c.After, before)
 					break
 				}
 			}

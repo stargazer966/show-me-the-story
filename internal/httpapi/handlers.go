@@ -886,11 +886,15 @@ func (h *Handlers) PostOutlineCharactersConfirm(w http.ResponseWriter, r *http.R
 			}
 			notes += role
 		}
+		firstAppearance := fmt.Sprintf("First appearance: Chapter %d", item.ChapterNum)
+		if h.cfg.Language == i18n.LangZH {
+			firstAppearance = fmt.Sprintf("首次登场：第%d章", item.ChapterNum)
+		}
 		h.settings.Characters = append(h.settings.Characters, story.Character{
 			ID:         h.settings.NextCharacterID(),
 			Name:       name,
 			Background: notes,
-			Notes:      fmt.Sprintf("首次登场：第%d章", item.ChapterNum),
+			Notes:      firstAppearance,
 		})
 		existing[name] = true
 	}
@@ -903,7 +907,10 @@ func (h *Handlers) PostOutlineCharactersConfirm(w http.ResponseWriter, r *http.R
 	if h.state.LastOutlineCharacterReport != nil {
 		h.state.LastOutlineCharacterReport.HasSuggestions = false
 		h.state.LastOutlineCharacterReport.Suggestions = nil
-		h.state.LastOutlineCharacterReport.Summary = "已采纳建议并登记角色"
+		h.state.LastOutlineCharacterReport.Summary = "Character suggestions accepted"
+		if h.cfg.Language == i18n.LangZH {
+			h.state.LastOutlineCharacterReport.Summary = "已采纳建议并登记角色"
+		}
 		_ = story.SaveProgress(h.progressPath, h.state)
 	}
 

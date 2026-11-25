@@ -18,6 +18,7 @@ import (
 	"showmethestory/internal/sse"
 	"showmethestory/internal/story"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -163,6 +164,7 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("POST /api/skill-library/install", h.PostSkillInstall)
 	mux.HandleFunc("GET /api/skill-library/{id}", h.GetSkillLibraryItem)
 	mux.HandleFunc("DELETE /api/skill-library/{id}", h.DeleteSkillLibraryItem)
+	mux.HandleFunc("PUT /api/skill-library/{id}/scopes", h.PutSkillScopes)
 	mux.HandleFunc("POST /api/skill-library/{id}/validate", h.PostSkillValidate)
 	mux.HandleFunc("POST /api/skill-library/{id}/optimize", h.PostSkillOptimize)
 
@@ -243,6 +245,7 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 		phase := ""
 		title := ""
 		bookStatus := ""
+		var outlined, written, drafts int
 		progressPath := filepath.Join(projectDir, "progress.json")
 		if data, err := os.ReadFile(progressPath); err == nil {
 			var p story.Progress
@@ -250,6 +253,24 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 				phase = p.Phase
 				title = p.Title
 				bookStatus = p.BookStatus
+				if compatibility == projectCompatibilitySupported {
+					for _, chapter := range p.Chapters {
+						if chapter.Inherited {
+							continue
+						}
+						if strings.TrimSpace(chapter.Outline) != "" {
+							outlined++
+						}
+						if chapter.WordCount > 0 {
+							written++
+						}
+					}
+					for _, part := range p.Desk.Parts {
+						if !part.Deleted && strings.TrimSpace(part.Beats) != "" {
+							drafts++
+						}
+					}
+				}
 			}
 		}
 
@@ -276,6 +297,9 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 		info := map[string]string{
 			"name":                    name,
 			"phase":                   phase,
+			"outlined_chapters":       strconv.Itoa(outlined),
+			"written_chapters":        strconv.Itoa(written),
+			"draft_chapters":          strconv.Itoa(drafts),
 			"book_status":             bookStatus,
 			"title":                   title,
 			"language":                lang,

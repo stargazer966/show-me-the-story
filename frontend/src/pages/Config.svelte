@@ -1,18 +1,24 @@
 <script>
- import Skills from './Skills.svelte';
- import {currentProject} from '../lib/stores.js';
- let section=sessionStorage.getItem('story-settings-tab')||'style';
- sessionStorage.removeItem('story-settings-tab');
- let direction, directionSnapshot;
- $: if(($progress?.long_term_direction||'')!==directionSnapshot){directionSnapshot=$progress?.long_term_direction||'';direction=directionSnapshot}
- async function saveDirection(){try{await api('POST','/api/story-desk',{project:$currentProject,action:'direction',direction,previous_direction:directionSnapshot});progress.set(await api('GET','/api/progress'));addToast($t('common.save'),'success')}catch(e){addToast(e.message,'error')}}
- import ImageDraft from "../components/ImageDraft.svelte";
+  import Skills from './Skills.svelte';
+  import ImageDraft from '../components/ImageDraft.svelte';
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
-  import { apiConfig, config, progress, settings, editingCharID, editingWvID, wvFilter, addToast, showConfirm, taskRunning, apiTestResult } from '../lib/stores.js';
+  import { apiConfig, config, currentProject, progress, settings, editingCharID, editingWvID, wvFilter, addToast, showConfirm, taskRunning, apiTestResult } from '../lib/stores.js';
   import { t } from '../lib/i18n/index.js';
   import { resolveChatCompletionsURL } from '../lib/apiUrl.js';
   import ConfigChangePanel from '../components/ConfigChangePanel.svelte';
+
+  const initialSection = sessionStorage.getItem('story-settings-tab');
+  let section = ['cast', 'skills', 'models'].includes(initialSection) ? initialSection : 'style';
+  sessionStorage.removeItem('story-settings-tab');
+  let direction = '', directionSnapshot;
+  let savingStory = false;
+  $: if (($progress?.long_term_direction || '') !== directionSnapshot) {
+    directionSnapshot = $progress?.long_term_direction || '';
+    direction = directionSnapshot;
+  }
+  $: storyDirty = !!storyCfgSnapshot && JSON.stringify(localStoryCfg) !== storyCfgSnapshot;
+  $: directionDirty = direction !== directionSnapshot;
 
   export let sendToChat = async () => {};
 
@@ -147,32 +153,53 @@
     }
   }
 
-  // 直接保存故事配置（不经过 AI），存在已确认章节且关键设定有变化时提示协调
-  async function saveStoryConfig() {
-    const prev = $config?.story || {};
-    const story = {
-      ...localStoryCfg,
-      target_words_per_chapter: Number(localStoryCfg.target_words_per_chapter) || 2500,
-    };
-    const settingsChanged =
-      story.type !== prev.type ||
-      story.writing_style !== prev.writing_style ||
-      story.writing_pov !== prev.writing_pov;
+  function setOutlineDetail(mode) {
+    if (mode === 'custom') return;
+    const [outline_min, outline_max] = mode === 'standard' ? [80, 140] : [200, 350];
+    localStoryCfg = { ...localStoryCfg, outline_min, outline_max };
+  }
 
+  async function saveStorySettings() {
+    if (savingStory || $taskRunning || !$config?.story || (!storyDirty && !directionDirty)) return;
+    const prev = $config.story;
+    let reconciledStory;
+    savingStory = true;
     try {
-      const saved = await api('PUT', '/api/config', { ...($config || {}), story });
-      config.set(saved);
-      addToast($t('config.story.saved'), 'success');
-
-      if (hasAccepted && settingsChanged) {
-        showConfirm($t('config.story.reconcileAsk'), async () => {
-          try {
-            await api('POST', '/api/settings/reconcile', saved.story);
-            addToast($t('config.story.reconcileStarted'), 'info');
-          } catch (e) { addToast(e.message, 'error'); }
-        });
+      if (storyDirty) {
+        const story = {
+          ...localStoryCfg,
+          target_words_per_chapter: Number(localStoryCfg.target_words_per_chapter) || 2500,
+        };
+        const settingsChanged = ['type', 'writing_style', 'writing_pov'].some(key => story[key] !== prev[key]);
+        const saved = await api('PUT', '/api/config', { ...$config, story });
+        localStoryCfg = { ...saved.story };
+        config.set(saved);
+        if (hasAccepted && settingsChanged) reconciledStory = saved.story;
       }
-    } catch (e) { addToast(e.message, 'error'); }
+
+      if (directionDirty) {
+        const result = await api('POST', '/api/story-desk', {
+          project: $currentProject, action: 'direction', direction, previous_direction: directionSnapshot,
+        });
+        directionSnapshot = result.direction || '';
+        direction = directionSnapshot;
+        progress.update(current => ({ ...current, long_term_direction: directionSnapshot }));
+      }
+      addToast($t('config.story.saved'), 'success');
+    } catch (e) {
+      addToast(e.message, 'error');
+    } finally {
+      savingStory = false;
+    }
+
+    if (reconciledStory) {
+      showConfirm($t('config.story.reconcileAsk'), async () => {
+        try {
+          await api('POST', '/api/settings/reconcile', reconciledStory);
+          addToast($t('config.story.reconcileStarted'), 'info');
+        } catch (e) { addToast(e.message, 'error'); }
+      });
+    }
   }
 
   let charFormSnapshot = '';
@@ -456,9 +483,14 @@
 <div class="space-y-3">
   <ConfigChangePanel />
   <h2 class="text-2xl font-semibold">{$t('nav.config')}</h2>
-  <div class="settings-layout"><nav class="flex flex-wrap gap-1 content-start" aria-label={$t('nav.config')}>
-  {#each ['style','length','cast','skills','models'] as id}<button class="btn btn-sm justify-start" class:btn-primary={section===id} on:click={()=>section=id}>{$t('desk.'+id)}</button>{/each}
-  </nav><section class="space-y-3 min-w-0">
+  <div class="settings-layout">
+    <nav class="settings-nav" aria-label={$t('nav.config')}>
+      {#each ['style', 'cast', 'skills', 'models'] as id}
+        <button class="btn btn-sm" class:btn-primary={section === id} aria-current={section === id ? 'page' : undefined}
+          on:click={() => section = id}>{$t('desk.' + id)}</button>
+      {/each}
+    </nav>
+    <section class="space-y-3 min-w-0">
   {#if section==='models'}
     <div class="card bg-base-200">
       <div class="card-body p-4 gap-2">
@@ -519,65 +551,92 @@
       </div>
     </div>
 
-    {:else if section==='style'||section==='length'}
-    <div class="card bg-base-200">
-      <div class="card-body p-4 gap-2">
-        <h3 class="card-title text-base">{$t(section==='style'?'desk.style':'desk.length')}</h3>
-        {#if hasAccepted}
-          <div class="alert alert-warning text-xs py-1.5 px-3">
-            <span>{$t('config.story.acceptedHint')}</span>
+  {:else if section === 'style'}
+    <form class="card story-settings-form" on:submit|preventDefault={saveStorySettings}>
+      <fieldset disabled={$taskRunning || savingStory || !$config?.story}>
+        <section class="story-settings-group">
+          <div class="story-settings-heading">
+            <h3>{$t('desk.storyDetails')}</h3>
+            <span>{$t('desk.language')} · {$t($config?.language === 'en' ? 'common.lang.en' : 'common.lang.zh')}</span>
           </div>
-        {/if}
-        <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
-          {#if section==='style'}
-          <div class="col-span-2">{$t('desk.language')} · {$config?.language==='en'?'English':'中文'}</div>
-          <div>
-            <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.story.type')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.type} placeholder={$t('config.story.type.placeholder')} disabled={$taskRunning} />
+          {#if hasAccepted}
+            <div class="alert alert-warning text-xs py-1.5 px-3">{$t('config.story.acceptedHint')}</div>
+          {/if}
+          <div class="story-settings-fields">
+            <label>
+              {$t('config.story.titleField')}
+              <input class="input input-sm w-full" bind:value={localStoryCfg.title} placeholder={$t('config.story.title.placeholder')} />
+            </label>
+            <label>
+              {$t('config.story.type')}
+              <input class="input input-sm w-full" bind:value={localStoryCfg.type} placeholder={$t('config.story.type.placeholder')} />
+            </label>
+            <label class="story-settings-full">
+              {$t('desk.direction')}
+              <textarea class="textarea w-full" rows="3" bind:value={direction}></textarea>
+            </label>
           </div>
-          <div>
-            <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.story.titleField')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.title} placeholder={$t('config.story.title.placeholder')} disabled={$taskRunning} />
-          </div>
-          {:else}
-          <h4 class="font-semibold col-span-2">{$t('desk.prose')}</h4>
-          <div>
-            <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.story.targetWords')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.target_words_per_chapter} disabled={$taskRunning} />
-          </div>{#if $config?.language==='en'}
-          <label>{$t('wf.tolerance')} <input class="input input-sm w-full" type="number" min="1" max="100" bind:value={localStoryCfg.word_tolerance} placeholder="10"/></label>
-          <h4 class="font-semibold col-span-2">{$t('desk.outline')}</h4><p class="col-span-2 text-sm">{$t('desk.bounds')}</p>
-          <label>{$t('wf.detail')} <select class="select select-sm w-full" value={(localStoryCfg.outline_min||200)===200 && (localStoryCfg.outline_max||350)===350?'detailed':localStoryCfg.outline_min===80 && localStoryCfg.outline_max===140?'standard':'custom'} on:change={e=>{const mode=e.currentTarget.value;if(mode!=='custom'){localStoryCfg.outline_min=mode==='standard'?80:200;localStoryCfg.outline_max=mode==='standard'?140:350}}}>{#each ['standard','detailed','custom'] as mode}<option value={mode}>{$t('wf.'+mode)}</option>{/each}</select></label>
-          <label>{$t('wf.outlineMin')} <input class="input input-sm w-full" type="number" min="1" bind:value={localStoryCfg.outline_min} placeholder="200"/></label>
-          <label>{$t('wf.outlineMax')} <input class="input input-sm w-full" type="number" min="1" bind:value={localStoryCfg.outline_max} placeholder="350"/></label>
-          {/if}{/if}
-        </div>
-        <div class="flex justify-end">
-          <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
-        </div>
-      </div>
-    </div>
-  {#if section==='style'}
-  <label class="block">{$t('desk.direction')}<textarea class="textarea w-full" bind:value={direction}></textarea></label><button class="btn btn-outline btn-sm" disabled={$taskRunning || direction===directionSnapshot} on:click={saveDirection}>{$t('common.save')}</button>
-  <!-- Writing Style & POV -->
-  <div class="card bg-base-200">
-    <div class="card-body p-4 gap-2">
-      <h3 class="card-title text-base">{$t('config.style.title')}</h3>
-      <div>
-        <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.style.label')}</span>
-        <textarea class="textarea w-full h-28 text-base" bind:value={localStoryCfg.writing_style} placeholder={$t('config.style.placeholder')} disabled={$taskRunning}></textarea>
-      </div>
-      <div>
-        <span class="text-xs text-base-content/65 mb-0.5 block">{$t('config.pov.label')}</span>
-        <textarea class="textarea w-full h-20 text-base" bind:value={localStoryCfg.writing_pov} placeholder={$t('config.pov.placeholder')} disabled={$taskRunning}></textarea>
-      </div>
-      <div class="flex justify-end">
-        <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
-      </div>
-    </div>
-  </div>
+        </section>
 
-  {/if}
+        <section class="story-settings-group">
+          <h3>{$t('config.style.title')}</h3>
+          <div class="story-settings-fields">
+            <label>
+              {$t('config.style.label')}
+              <textarea class="textarea w-full" rows="4" bind:value={localStoryCfg.writing_style} placeholder={$t('config.style.placeholder')}></textarea>
+            </label>
+            <label>
+              {$t('config.pov.label')}
+              <textarea class="textarea w-full" rows="4" bind:value={localStoryCfg.writing_pov} placeholder={$t('config.pov.placeholder')}></textarea>
+            </label>
+          </div>
+        </section>
+
+        <section class="story-settings-group">
+          <h3>{$t('desk.length')}</h3>
+          <h4>{$t('desk.prose')}</h4>
+          <div class="story-settings-fields">
+            <label>
+              {$t('config.story.targetWords')}
+              <input class="input input-sm w-full" type="number" bind:value={localStoryCfg.target_words_per_chapter} />
+            </label>
+            {#if $config?.language === 'en'}
+              <label>
+                {$t('wf.tolerance')}
+                <input class="input input-sm w-full" type="number" min="1" max="100" bind:value={localStoryCfg.word_tolerance} placeholder="10" />
+              </label>
+            {/if}
+          </div>
+          {#if $config?.language === 'en'}
+            <p class="story-settings-help">{$t('desk.beatLength')}</p>
+            <h4>{$t('desk.batch')}</h4>
+            <p class="story-settings-help">{$t('desk.bounds')}</p>
+            <div class="story-settings-fields">
+              <label class="story-settings-full">
+                {$t('wf.detail')}
+                <select class="select select-sm w-full"
+                  value={(localStoryCfg.outline_min || 200) === 200 && (localStoryCfg.outline_max || 350) === 350 ? 'detailed' : localStoryCfg.outline_min === 80 && localStoryCfg.outline_max === 140 ? 'standard' : 'custom'}
+                  on:change={e => setOutlineDetail(e.currentTarget.value)}>
+                  {#each ['standard', 'detailed', 'custom'] as mode}<option value={mode}>{$t('wf.' + mode)}</option>{/each}
+                </select>
+              </label>
+              <label>
+                {$t('wf.outlineMin')}
+                <input class="input input-sm w-full" type="number" min="1" bind:value={localStoryCfg.outline_min} placeholder="200" />
+              </label>
+              <label>
+                {$t('wf.outlineMax')}
+                <input class="input input-sm w-full" type="number" min="1" bind:value={localStoryCfg.outline_max} placeholder="350" />
+              </label>
+            </div>
+          {/if}
+        </section>
+
+        <div class="story-settings-actions">
+          <button class="btn btn-primary btn-sm" type="submit" disabled={!storyDirty && !directionDirty}>{$t('common.save')}</button>
+        </div>
+      </fieldset>
+    </form>
   {:else if section==='skills'}<Skills/>
   {:else}
   <ImageDraft/>

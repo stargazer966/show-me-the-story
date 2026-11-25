@@ -134,6 +134,12 @@ func TestDeskBeatGuidanceFlowsToWriting(t *testing.T) {
 	if ch.DeskVersion != 2 || !strings.Contains(deskWritingGuidance(p, ch, 2, "en"), "45%") || !strings.Contains(deskWritingGuidance(p, ch, 1, "en"), "40%") {
 		t.Fatal("guidance was not versioned")
 	}
+	shown := ProgressView(p).Chapters[0].WritingGuidance
+	if shown == nil || len(shown.Beats) != 2 ||
+		!strings.Contains(shown.Beats[1].Instruction, "45%") ||
+		!strings.Contains(shown.ChapterRemarks, "Keep the ending quiet") {
+		t.Fatal("progress must show the guidance from the adopted outline")
+	}
 	model = batchAPI(t, func(prompt string) string {
 		for _, want := range []string{"Prose guidance from the outline version", "45%", "Keep the ending quiet", "Brief transition"} {
 			if !strings.Contains(prompt, want) {
@@ -144,5 +150,49 @@ func TestDeskBeatGuidanceFlowsToWriting(t *testing.T) {
 	})
 	if _, err := generateChapterContentStream(context.Background(), model, cfg, p, 0, &ProjectSettings{}, "", sse.NewLogBroadcaster()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeskDeleteAndRestorePreserveDraftAndWriting(t *testing.T) {
+	draft := DeskDraft{Title: "Station", Beats: "Find the letter", Focus: "Build tension"}
+	version := DeskVersion{Source: draft, Lines: []string{"Mara finds the letter."}}
+	chapter := ChapterState{Num: 1, Title: draft.Title, DeskPart: 1, DeskVersion: 1, Outline: version.Lines[0], Content: "Mara saw her name.", Status: StatusAccepted}
+	state := &Progress{
+		Phase: "writing",
+		Desk: StoryDesk{Parts: []DeskPart{
+			{DeskDraft: draft, Versions: []DeskVersion{version}},
+			{DeskDraft: DeskDraft{Title: "Home"}},
+		}},
+		Chapters: []ChapterState{chapter},
+	}
+	cfg := config.DefaultConfigForLang("en")
+	path := filepath.Join(t.TempDir(), "progress.json")
+	run := func(action string) error {
+		_, err := RunDesk(context.Background(), path, state, cfg, nil, nil, nil, DeskRequest{Action: action, Part: 1, Revision: state.Desk.Revision})
+		return err
+	}
+	if err := run("delete"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("save"); err == nil {
+		t.Fatal("a deleted part accepted a draft edit")
+	}
+	if err := run("open"); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := LoadProgress(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state = persisted
+	if !state.Desk.Parts[0].Deleted || state.Desk.Parts[1].Title != "Home" || state.Chapters[0].Content != chapter.Content || state.Chapters[0].DeskPart != 1 {
+		t.Fatal("deletion changed the linked Writing chapter or another part")
+	}
+	if err := run("restore"); err != nil {
+		t.Fatal(err)
+	}
+	part := state.Desk.Parts[0]
+	if part.Deleted || !sameDeskDraft(part.DeskDraft, draft) || !reflect.DeepEqual(part.Versions, []DeskVersion{version}) {
+		t.Fatal("restore did not recover the draft and outline")
 	}
 }

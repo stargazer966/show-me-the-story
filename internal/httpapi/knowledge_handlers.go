@@ -124,6 +124,9 @@ func (h *Handlers) GetKnowledge(w http.ResponseWriter, r *http.Request) {
 	}
 	changes := []story.SettingChange{}
 	for _, c := range h.settings.StoryChanges {
+		if c.Desk != nil {
+			continue
+		}
 		if c.Status == "pending" {
 			changes = append(changes, c)
 		}

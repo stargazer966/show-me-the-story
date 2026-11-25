@@ -87,7 +87,7 @@ func TestEnglishWordCountControl(t *testing.T) {
 	cfg := config.DefaultConfigForLang("en")
 	cfg.SkillConfig.EnabledSkills["english-word-count-control"] = true
 	cfg.Story.TargetWordsPerChapter = 800
-	lo, hi := configuredChapterRange(800, cfg)
+	lo, hi := configuredChapterRange(800, cfg, SkillScopeChapterGenerate)
 	if lo != 720 || hi != 880 {
 		t.Fatal(lo, hi)
 	}

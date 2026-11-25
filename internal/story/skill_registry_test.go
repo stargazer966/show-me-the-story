@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"showmethestory/internal/config"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,26 @@ func TestInstallSkillAndInvalidateValidationOnContentChange(t *testing.T) {
 	}
 	if second.ContentHash == first.ContentHash || second.Validation != nil {
 		t.Fatalf("changed content must invalidate validation: %+v", second)
+	}
+}
+
+func TestSkillReferenceBudget(t *testing.T) {
+	files := testSkillFiles("Follow the chapter outline.")
+	files["references/a.md"] = bytes.Repeat([]byte("a"), 41<<10)
+	files["references/b.md"] = bytes.Repeat([]byte("b"), 39<<10)
+	files["references/c.md"] = bytes.Repeat([]byte("c"), 17<<10)
+	skill, err := InstallSkillFiles(t.TempDir(), files, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := FormatSkillsContent([]Skill{skill})
+	for _, ref := range []string{"references/a.md", "references/b.md"} {
+		if !strings.Contains(prompt, ref) {
+			t.Errorf("missing reference %s in prompt", ref)
+		}
+	}
+	if strings.Contains(prompt, "references/c.md") || len(skill.Resources) != 3 {
+		t.Fatal("expected the over-budget reference to stay installed and be omitted from the prompt")
 	}
 }
 

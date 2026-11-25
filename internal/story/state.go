@@ -10,6 +10,9 @@ import (
 )
 
 type ChapterState struct {
+	// WritingGuidance is derived from the adopted outline for the progress API.
+	WritingGuidance *deskProseGuidance `json:"writing_guidance,omitempty"`
+
 	DeskPart         int    `json:"desk_part,omitempty"`
 	DeskVersion      int    `json:"desk_version,omitempty"`
 	DeskProseVersion int    `json:"desk_prose_version,omitempty"`

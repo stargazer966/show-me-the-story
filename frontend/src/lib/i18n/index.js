@@ -16,15 +16,14 @@ function readStored() {
   return null;
 }
 
-export const uiLocale = writable(readStored() || 'zh');
+export const uiLocale = writable(readStored() || 'en');
 
-uiLocale.subscribe(v => {
-  try {
-    if (v === 'zh' || v === 'en') {
-      localStorage.setItem(STORAGE_KEY, v);
-      document.documentElement.lang = v === 'en' ? 'en' : 'zh-CN';
-    }
-  } catch (e) {}
+uiLocale.subscribe(lang => {
+  if (typeof document !== 'undefined') {
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN';
+    document.title = catalogs[lang]['app.title'];
+  }
+  try { localStorage.setItem(STORAGE_KEY, lang); } catch {}
 });
 
 export function setLocale(lang) {
